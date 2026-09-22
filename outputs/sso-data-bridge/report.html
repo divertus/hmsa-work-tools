@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SSO Data Bridge - 数据分析</title>
+    <link rel="stylesheet" href="report.css">
+  </head>
+  <body>
+    <header class="report-header">
+      <div class="report-title-block">
+        <p class="eyebrow">SSO DATA BRIDGE</p>
+        <div class="title-line">
+          <h1>数据分析工作台</h1>
+          <span id="dataset-status" class="status-badge">读取中</span>
+        </div>
+        <p id="dataset-caption" class="muted">正在读取数据集。</p>
+      </div>
+
+      <div class="template-controls">
+        <label class="compact-field">
+          <span>报表模板</span>
+          <select id="template-select"></select>
+        </label>
+        <label class="compact-field">
+          <span>模板名称</span>
+          <input id="template-name" type="text" placeholder="例如：订单分析">
+        </label>
+        <div class="button-row">
+          <button id="new-template-button" class="button" type="button">新建</button>
+          <button id="save-template-button" class="button button-primary" type="button">保存</button>
+          <button id="save-as-template-button" class="button" type="button">另存为</button>
+          <button id="delete-template-button" class="button button-danger" type="button">删除</button>
+        </div>
+      </div>
+
+      <div class="export-controls">
+        <button id="export-png-button" class="button" type="button">看板 PNG</button>
+        <button id="export-html-button" class="button" type="button">本地 HTML</button>
+        <button id="export-rules-button" class="button" type="button">导出规则</button>
+        <button id="import-rules-button" class="button" type="button">导入规则</button>
+        <button id="export-immersive-png-button" class="button" type="button">沉浸 PNG</button>
+      </div>
+    </header>
+
+    <main class="report-workspace">
+      <aside class="report-sidebar">
+        <section class="sidebar-section" data-section="source">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Source</p>
+              <h2>响应数组</h2>
+            </div>
+            <div class="section-controls">
+              <button id="reload-data-button" class="text-button" type="button">重新读取</button>
+              <button class="section-toggle" data-toggle-section="source" type="button" aria-expanded="true">−</button>
+            </div>
+          </div>
+          <label class="field">
+            <span>数组字段路径</span>
+            <select id="array-path-select"></select>
+          </label>
+          <div id="dataset-summary" class="summary-grid"></div>
+        </section>
+
+        <section class="sidebar-section" data-section="fields">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Fields</p>
+              <h2>原始数据表字段</h2>
+            </div>
+            <div class="section-controls">
+              <span id="field-count" class="muted">0 个字段</span>
+              <button class="section-toggle" data-toggle-section="fields" type="button" aria-expanded="true">−</button>
+            </div>
+          </div>
+          <label class="field">
+            <span>搜索字段</span>
+            <input id="field-search" type="search" placeholder="字段名">
+          </label>
+          <div class="button-row fields-actions">
+            <button id="hide-unselected-fields-button" class="button" type="button">隐藏未选中</button>
+            <button id="move-unselected-fields-top-button" class="button" type="button">未选中置顶</button>
+          </div>
+          <div id="field-list" class="field-list"></div>
+        </section>
+
+        <section class="sidebar-section" data-section="mapping">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Mapping</p>
+              <h2>字段与值映射</h2>
+            </div>
+            <div class="section-controls">
+              <button class="section-toggle" data-toggle-section="mapping" type="button" aria-expanded="true">−</button>
+            </div>
+          </div>
+          <div class="subsection-heading">
+            <h3>字段派生映射</h3>
+          </div>
+          <textarea id="field-mapping-json" rows="11" spellcheck="false" placeholder="在这里导入派生规则 JSON"></textarea>
+          <div class="button-row mapping-json-actions">
+            <button id="apply-field-mapping-button" class="button" type="button">应用 JSON</button>
+            <button id="download-field-mapping-template-button" class="text-button" type="button">下载模板</button>
+            <button id="import-field-mapping-button" class="text-button" type="button">导入 JSON</button>
+            <input id="field-mapping-file-input" type="file" accept="application/json,.json" hidden>
+          </div>
+          <p id="field-mapping-state" class="muted">尚未应用字段派生规则。</p>
+          <div class="subsection-heading">
+            <h3>字段值映射</h3>
+            <button id="add-mapping-button" class="text-button" type="button">新增值映射</button>
+          </div>
+          <label class="field">
+            <span>映射字段</span>
+            <select id="mapping-field-select"></select>
+          </label>
+          <div id="mapping-list" class="mapping-list"></div>
+        </section>
+
+        <section class="sidebar-section" data-section="filters">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Filters</p>
+              <h2>组合筛选</h2>
+            </div>
+            <div class="section-controls">
+              <button id="add-filter-button" class="text-button" type="button">新增条件</button>
+              <button class="section-toggle" data-toggle-section="filters" type="button" aria-expanded="true">−</button>
+            </div>
+          </div>
+          <div class="subsection-heading">
+            <h3>常用条件库</h3>
+          </div>
+          <div class="common-filter-create">
+            <input id="common-filter-name" type="text" placeholder="唯一名称">
+            <button id="save-common-filter-button" class="button" type="button">保存当前条件</button>
+          </div>
+          <div id="common-filter-list" class="common-filter-list"></div>
+          <label class="field">
+            <span>条件关系</span>
+            <select id="filter-logic">
+              <option value="all">全部满足 AND</option>
+              <option value="any">任一满足 OR</option>
+            </select>
+          </label>
+          <div id="filter-list" class="filter-list"></div>
+        </section>
+      </aside>
+
+      <section class="report-main">
+        <div class="dashboard-toolbar">
+          <div class="dashboard-title">
+            <div>
+              <p class="section-kicker">Dashboard</p>
+              <h2 id="dashboard-heading">分析看板</h2>
+            </div>
+            <div id="analysis-summary" class="analysis-summary"></div>
+          </div>
+          <div class="button-row">
+            <button id="toggle-sidebar-button" class="button" type="button">隐藏左侧</button>
+            <button id="immersive-button" class="button" type="button">沉浸态</button>
+            <button id="add-widget-button" class="button button-primary" type="button">添加组件</button>
+            <button id="reset-dashboard-button" class="button" type="button">恢复默认编排</button>
+          </div>
+        </div>
+
+        <div id="dashboard-grid" class="dashboard-grid"></div>
+        <p id="dashboard-empty" class="dashboard-empty">请选择字段并添加分析组件。</p>
+      </section>
+    </main>
+
+    <dialog id="widget-dialog" class="widget-dialog">
+      <form id="widget-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">Widget</p>
+            <h2 id="widget-dialog-title">添加分析组件</h2>
+          </div>
+          <button id="widget-dialog-close" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="two-column">
+          <label class="field">
+            <span>组件标题</span>
+            <input id="widget-title" type="text" required>
+          </label>
+          <label class="field">
+            <span>展示模式</span>
+            <select id="widget-type">
+              <option value="kpi">指标卡</option>
+              <option value="table">二维表格</option>
+              <option value="pivot">数据透视表</option>
+              <option value="bar">条形图</option>
+              <option value="pie">饼图</option>
+              <option value="stackedBar">堆积条形图</option>
+              <option value="line">折线图</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="two-column">
+          <label class="field">
+            <span>行维度</span>
+            <select id="widget-dimension"></select>
+          </label>
+          <label class="field">
+            <span>系列维度（可选）</span>
+            <select id="widget-series"></select>
+          </label>
+        </div>
+
+        <div class="three-column">
+          <label class="field">
+            <span>统计方式</span>
+            <select id="widget-aggregation">
+              <option value="count">计数</option>
+              <option value="sum">求和</option>
+              <option value="avg">平均值</option>
+              <option value="min">最小值</option>
+              <option value="max">最大值</option>
+              <option value="distinct">去重计数</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>统计字段</span>
+            <select id="widget-metric-field"></select>
+          </label>
+          <label class="field">
+            <span>统计别名</span>
+            <input id="widget-metric-alias" type="text" placeholder="例如：销售额">
+          </label>
+        </div>
+
+        <div class="three-column">
+          <label class="field">
+            <span>排序</span>
+            <select id="widget-sort">
+              <option value="desc">指标降序</option>
+              <option value="asc">指标升序</option>
+              <option value="labelAsc">维度升序</option>
+              <option value="none">保持原序</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>横轴标签</span>
+            <select id="widget-axis-label-mode">
+              <option value="scroll">滚动展示</option>
+              <option value="wrap">自动换行</option>
+            </select>
+          </label>
+          <label class="check-field">
+            <input id="widget-show-values" type="checkbox">
+            <span>显示数值</span>
+          </label>
+        </div>
+
+        <div class="three-column">
+          <label class="field">
+            <span>显示条目上限（0 表示全部）</span>
+            <input id="widget-limit" type="number" min="0" max="10000">
+          </label>
+          <label class="field">
+            <span>表格每页数量</span>
+            <input id="widget-page-size" type="number" min="1" max="1000">
+          </label>
+          <label class="field">
+            <span>组件宽度</span>
+            <select id="widget-size">
+              <option value="half">半宽</option>
+              <option value="full">整行</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="two-column">
+          <label id="pie-legend-threshold-field" class="field">
+            <span>饼图图例纵向排列阈值</span>
+            <input id="widget-pie-legend-threshold" type="number" min="1" max="100">
+          </label>
+          <label class="field">
+            <span>小面积数值显示</span>
+            <select id="widget-small-value-mode">
+              <option value="leader">导引线展示</option>
+              <option value="shrink">缩小字体</option>
+              <option value="hover">仅鼠标悬停</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="two-column">
+          <label class="field">
+            <span>组件缩放比例</span>
+            <input id="widget-scale" type="number" min="0.5" max="3" step="0.1">
+          </label>
+          <span class="muted scale-hint">例如 1 为原始大小，1.5 为放大 150%。</span>
+        </div>
+
+        <div class="widget-filter-editor">
+          <div class="field-label-row">
+            <span>组件独立筛选</span>
+            <div class="button-row">
+              <button id="widget-add-filter-button" class="text-button" type="button">新增条件</button>
+              <button id="widget-add-filter-group-button" class="text-button" type="button">新增分组</button>
+              <button id="widget-add-filter-reference-button" class="text-button" type="button">引用常用条件</button>
+            </div>
+          </div>
+          <div id="widget-filter-list" class="filter-list"></div>
+        </div>
+
+        <div class="color-editor">
+          <div class="field-label-row">
+            <span>图表颜色</span>
+            <button id="reset-widget-colors-button" class="text-button" type="button">恢复自动配色</button>
+          </div>
+          <div id="widget-color-list" class="color-list"></div>
+        </div>
+
+        <div class="dialog-actions">
+          <button id="widget-cancel-button" class="button" type="button">取消</button>
+          <button class="button button-primary" type="submit">应用组件</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <button id="immersive-exit-button" class="immersive-exit" type="button" hidden>退出沉浸态</button>
+    <input id="report-rules-input" type="file" accept="application/json,.json" hidden>
+    <script type="module" src="report.js"></script>
+  </body>
+</html>

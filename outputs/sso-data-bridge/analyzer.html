@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SSO Data Bridge - JSON 结果</title>
+    <link rel="stylesheet" href="analyzer.css">
+  </head>
+  <body>
+    <header class="analyzer-header">
+      <div>
+        <p class="eyebrow">SSO DATA BRIDGE</p>
+        <h1>结果 JSON</h1>
+      </div>
+      <div class="header-meta">
+        <span id="dataset-status" class="status status-idle">等待数据</span>
+        <span id="last-updated" class="muted"></span>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="结果操作">
+      <label class="control control-dataset">
+        <span>数据集</span>
+        <select id="dataset-select"></select>
+      </label>
+      <label class="control">
+        <span>显示行数</span>
+        <input id="row-limit" type="number" min="1" max="100000" value="300">
+      </label>
+      <div class="toolbar-actions">
+        <button id="refresh-button" class="button" type="button">刷新</button>
+        <button id="open-report-button" class="button" type="button">数据分析</button>
+        <button id="copy-button" class="button" type="button">复制 JSON</button>
+        <button id="download-button" class="button button-primary" type="button">下载完整 JSON</button>
+        <button id="delete-button" class="button button-danger" type="button">删除数据集</button>
+      </div>
+    </section>
+
+    <section id="summary" class="summary" aria-label="数据集摘要"></section>
+
+    <main class="json-shell">
+      <pre id="json-output" tabindex="0">{"message":"正在读取数据..."}</pre>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="analyzer.js"></script>
+  </body>
+</html>

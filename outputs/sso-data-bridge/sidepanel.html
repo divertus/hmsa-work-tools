@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SSO Data Bridge</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-copy">
+        <p class="eyebrow">SSO DATA BRIDGE</p>
+        <h1>接口抓取配置</h1>
+      </div>
+      <div class="header-actions">
+        <button id="open-report-button" class="button button-quiet" type="button">分析</button>
+        <button id="open-analyzer-button" class="button button-quiet" type="button">JSON</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" aria-labelledby="profile-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">本地配置</p>
+            <h2 id="profile-heading">接口配置库</h2>
+          </div>
+          <span id="draft-state" class="muted">草稿已恢复</span>
+        </div>
+        <label class="field">
+          <span>选择已保存配置</span>
+          <select id="profile-select"></select>
+        </label>
+        <div class="button-grid">
+          <button id="new-profile-button" class="button button-quiet" type="button">新建</button>
+          <button id="save-profile-button" class="button button-primary" type="button">保存</button>
+          <button id="save-as-profile-button" class="button button-quiet" type="button">另存为</button>
+          <button id="delete-profile-button" class="button button-quiet button-danger" type="button">删除</button>
+          <button id="export-profile-button" class="button button-quiet" type="button">导出</button>
+          <button id="import-profile-button" class="button button-quiet" type="button">导入</button>
+          <input id="import-file-input" type="file" accept="application/json,.json" hidden>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="report-template-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Reporting</p>
+            <h2 id="report-template-heading">报表模板</h2>
+          </div>
+          <span id="report-template-state" class="muted">本地模板</span>
+        </div>
+        <label class="field">
+          <span>选择报表模板</span>
+          <select id="report-template-select"></select>
+        </label>
+        <div class="two-column">
+          <button id="open-report-template-button" class="button button-primary" type="button">打开报表</button>
+          <button id="delete-report-template-button" class="button button-quiet button-danger" type="button">删除模板</button>
+        </div>
+      </section>
+
+      <form id="config-form" novalidate>
+        <section class="panel" aria-labelledby="request-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Request</p>
+              <h2 id="request-heading">接口请求</h2>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>配置名称</span>
+            <input id="config-name" type="text" autocomplete="off" placeholder="例如：订单列表">
+          </label>
+
+          <div class="two-column">
+            <label class="field">
+              <span>请求方法</span>
+              <select id="request-method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>执行上下文</span>
+              <select id="request-context">
+                <option value="tab">当前页面（推荐 SSO）</option>
+                <option value="background">扩展后台</option>
+              </select>
+            </label>
+          </div>
+          <p class="field-hint">
+            当前页面模式在目标标签页内发请求，自动复用该站点的登录 Cookie。后台模式只建议用于公开接口或不依赖页面会话的接口。
+          </p>
+
+          <label class="field">
+            <span>接口 URL</span>
+            <textarea id="request-url" rows="2" spellcheck="false" placeholder="https://data.example.com/api/orders"></textarea>
+          </label>
+
+          <label class="field">
+            <span>请求头 JSON</span>
+            <textarea id="request-headers" rows="6" spellcheck="false"></textarea>
+          </label>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label for="request-body-mode">请求体</label>
+              <select id="request-body-mode" class="compact-select">
+                <option value="json">JSON</option>
+                <option value="text">Raw Text</option>
+                <option value="none">无请求体</option>
+              </select>
+            </div>
+            <textarea id="request-body" rows="7" spellcheck="false"></textarea>
+          </div>
+
+          <details class="helper">
+            <summary>页面变量占位符</summary>
+            <p><code>{{timestamp}}</code>、<code>{{uuid}}</code>、<code>{{date}}</code>、<code>{{isoDate}}</code></p>
+            <p><code>{{meta:csrf-token}}</code>、<code>{{input:csrf-token}}</code>、<code>{{cookie:XSRF-TOKEN}}</code>、<code>{{localStorage:key}}</code>、<code>{{sessionStorage:key}}</code>、<code>{{global:path}}</code></p>
+            <p>占位符会在“当前页面”执行模式下解析。HttpOnly Cookie 不需要填写，浏览器会自动携带。</p>
+          </details>
+        </section>
+
+        <section class="panel" aria-labelledby="pagination-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Pagination</p>
+              <h2 id="pagination-heading">分页查询</h2>
+            </div>
+            <label class="toggle">
+              <input id="pagination-enabled" type="checkbox">
+              <span>启用</span>
+            </label>
+          </div>
+
+          <div id="pagination-fields">
+            <div class="two-column">
+              <label class="field">
+                <span>分页类型</span>
+                <select id="pagination-type">
+                  <option value="page">页码 page</option>
+                  <option value="offset">偏移 offset</option>
+                  <option value="cursor">游标 cursor</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>参数位置</span>
+                <select id="pagination-target">
+                  <option value="body">JSON Body</option>
+                  <option value="query">Query String</option>
+                  <option value="header">Header</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="page-parameter-fields" class="two-column" data-pagination-type="page offset">
+              <label class="field">
+                <span id="page-parameter-label">页码参数名</span>
+                <input id="pagination-page-param" type="text" spellcheck="false" placeholder="pageNum">
+              </label>
+              <label class="field">
+                <span>每页条数参数名</span>
+                <input id="pagination-size-param" type="text" spellcheck="false" placeholder="pageSize">
+              </label>
+            </div>
+
+            <div id="cursor-parameter-fields" class="two-column" data-pagination-type="cursor">
+              <label class="field">
+                <span>cursor 参数名</span>
+                <input id="pagination-cursor-param" type="text" spellcheck="false" placeholder="cursor">
+              </label>
+              <label class="field">
+                <span>初始 cursor（可选）</span>
+                <input id="pagination-initial-cursor" type="text" spellcheck="false" placeholder="留空则不发送">
+              </label>
+            </div>
+
+            <div class="three-column">
+              <label class="field">
+                <span>每页条数</span>
+                <input id="pagination-page-size" type="number" min="1">
+              </label>
+              <label class="field" data-pagination-type="page">
+                <span>起始页</span>
+                <input id="pagination-start-page" type="number">
+              </label>
+              <label class="field" data-pagination-type="page">
+                <span>页码步长</span>
+                <input id="pagination-step" type="number">
+              </label>
+              <label class="field" data-pagination-type="offset">
+                <span>起始 offset</span>
+                <input id="pagination-start-offset" type="number">
+              </label>
+              <label class="field">
+                <span>最大页数</span>
+                <input id="pagination-max-pages" type="number" min="1">
+              </label>
+            </div>
+
+            <div class="subsection-heading">
+              <h3>响应数据提取</h3>
+              <p>支持点路径和数组下标，例如 <code>data.rows</code>、<code>result.items[0]</code>。</p>
+            </div>
+
+            <div class="two-column">
+              <label class="field">
+                <span>数据数组路径</span>
+                <input id="pagination-data-path" type="text" spellcheck="false" placeholder="留空自动识别，如 data.rows">
+              </label>
+              <label class="field">
+                <span>总数路径</span>
+                <input id="pagination-total-path" type="text" spellcheck="false" placeholder="如 data.total">
+              </label>
+              <label class="field">
+                <span>总页数路径</span>
+                <input id="pagination-page-count-path" type="text" spellcheck="false" placeholder="如 data.pages">
+              </label>
+              <label class="field">
+                <span>hasNext 路径</span>
+                <input id="pagination-has-next-path" type="text" spellcheck="false" placeholder="如 data.hasNext">
+              </label>
+              <label class="field">
+                <span>下一页 cursor 路径</span>
+                <input id="pagination-next-cursor-path" type="text" spellcheck="false" placeholder="如 data.nextCursor">
+              </label>
+              <label class="field">
+                <span>去重字段路径（可选）</span>
+                <input id="pagination-dedupe-path" type="text" spellcheck="false" placeholder="如 id">
+              </label>
+            </div>
+
+            <label class="check-row">
+              <input id="pagination-stop-short-page" type="checkbox">
+              <span>后端未返回 total/hasNext 时，遇到不足一页的数据就停止</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="run-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Execution</p>
+              <h2 id="run-heading">运行</h2>
+            </div>
+            <span id="job-status-badge" class="status-badge status-idle">空闲</span>
+          </div>
+
+          <div class="two-column">
+            <label class="field">
+              <span>请求间隔（毫秒）</span>
+              <input id="run-interval" type="number" min="0">
+            </label>
+            <label class="field">
+              <span>单次超时（毫秒）</span>
+              <input id="run-timeout" type="number" min="1">
+            </label>
+          </div>
+
+          <div class="progress-track" aria-hidden="true">
+            <div id="job-progress-bar" class="progress-bar"></div>
+          </div>
+          <p id="job-status-message" class="status-message">当前没有运行中的任务。</p>
+          <p id="job-metrics" class="muted"></p>
+
+          <div class="button-grid run-actions">
+            <button id="run-job-button" class="button button-primary" type="button">运行抓取</button>
+            <button id="stop-job-button" class="button button-quiet" type="button" disabled>停止</button>
+          </div>
+        </section>
+      </form>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

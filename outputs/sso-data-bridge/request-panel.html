@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SSO 数据接口</title>
+    <link rel="stylesheet" href="request-panel.css">
+  </head>
+  <body>
+    <header class="panel-header">
+      <div>
+        <h1>网络请求监听</h1>
+        <p id="capture-state">正在读取当前 Network 日志。</p>
+      </div>
+      <div class="header-actions">
+        <button id="refresh-button" class="button" type="button">读取当前请求</button>
+        <button id="clear-button" class="button button-quiet" type="button">清空列表</button>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <label class="control control-search">
+        <span>URL 过滤</span>
+        <input id="search-input" type="search" placeholder="/api/orders">
+      </label>
+      <label class="control">
+        <span>请求类型</span>
+        <select id="type-filter">
+          <option value="api">XHR / Fetch / JSON</option>
+          <option value="all">全部</option>
+          <option value="xhr">XHR</option>
+          <option value="fetch">Fetch</option>
+          <option value="json">JSON</option>
+        </select>
+      </label>
+      <label class="check">
+        <input id="hide-options" type="checkbox" checked>
+        <span>隐藏 OPTIONS</span>
+      </label>
+      <span id="request-count" class="count">0 个请求</span>
+    </section>
+
+    <main class="workspace">
+      <section class="request-list" aria-label="网络请求列表">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-method">Method</th>
+              <th class="col-status">Status</th>
+              <th>URL</th>
+              <th class="col-type">Type</th>
+              <th class="col-size">Size</th>
+              <th class="col-time">Time</th>
+            </tr>
+          </thead>
+          <tbody id="request-table-body"></tbody>
+        </table>
+        <p id="empty-state" class="empty-state">点击页面上的查询后，请求会显示在这里。</p>
+      </section>
+
+      <aside class="request-detail" aria-label="请求详情">
+        <div class="detail-heading">
+          <div>
+            <p class="eyebrow">Selected request</p>
+            <h2 id="detail-title">尚未选择请求</h2>
+          </div>
+          <span id="detail-badge" class="badge badge-muted">未选择</span>
+        </div>
+
+        <dl id="detail-meta" class="detail-meta"></dl>
+
+        <div class="detail-actions">
+          <button id="apply-button" class="button button-primary" type="button" disabled>填入侧边栏配置</button>
+          <span id="apply-state" class="muted"></span>
+        </div>
+
+        <nav class="detail-tabs" aria-label="详情视图">
+          <button class="tab is-active" type="button" data-view="request">请求</button>
+          <button class="tab" type="button" data-view="response">响应</button>
+          <button class="tab" type="button" data-view="inferred">推断</button>
+        </nav>
+
+        <pre id="detail-content" class="detail-content">请选择一条请求。</pre>
+      </aside>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="request-panel.js"></script>
+  </body>
+</html>
