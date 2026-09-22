@@ -5,6 +5,7 @@ import {
   STORAGE_KEYS,
   validateConfig
 } from "./lib/config.js";
+import { normalizeCommonFiltersForStorage } from "./lib/report-rules.js";
 
 const elements = {
   configForm: document.querySelector("#config-form"),
@@ -467,21 +468,25 @@ async function importDashboardPackage(packageData) {
 
   reportTemplates.push(...normalizedTemplates);
   const commonStored = await chrome.storage.local.get(STORAGE_KEYS.commonFilters);
-  const commonMap = new Map(
-    (commonStored[STORAGE_KEYS.commonFilters] || []).map((item) => [item.name, item])
-  );
-  for (const item of packageData.commonFilters || []) {
-    if (item?.name) {
-      commonMap.set(item.name, item);
-    }
-  }
+  const storedCommonFilters = Array.isArray(commonStored[STORAGE_KEYS.commonFilters])
+    ? commonStored[STORAGE_KEYS.commonFilters]
+    : [];
+  const importedCommonFilters = Array.isArray(packageData.commonFilters)
+    ? packageData.commonFilters
+    : packageData.commonFilters
+      ? [packageData.commonFilters]
+      : [];
+  const mergedCommonFilters = normalizeCommonFiltersForStorage([
+    ...storedCommonFilters,
+    ...importedCommonFilters
+  ], normalizedTemplates);
   await Promise.all([
     persistProfiles(),
     chrome.storage.local.set({
       [STORAGE_KEYS.activeProfileId]: activeProfileId,
       [STORAGE_KEYS.draft]: currentConfig,
       [STORAGE_KEYS.reportTemplates]: reportTemplates,
-      [STORAGE_KEYS.commonFilters]: [...commonMap.values()]
+      [STORAGE_KEYS.commonFilters]: mergedCommonFilters
     })
   ]);
   renderProfileSelect();
@@ -490,7 +495,9 @@ async function importDashboardPackage(packageData) {
     type: "REPORT_TEMPLATES_UPDATED",
     templateId: normalizedTemplates[0]?.id || null
   }).catch(() => {});
-  showToast(`已导入请求和 ${normalizedTemplates.length} 个报表模板。`);
+  showToast(
+    `已导入请求、${normalizedTemplates.length} 个报表模板和 ${mergedCommonFilters.length} 个常用条件。`
+  );
 }
 
 async function runJob() {

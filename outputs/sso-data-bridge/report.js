@@ -1,4 +1,5 @@
 import { createId, STORAGE_KEYS } from "./lib/config.js";
+import { normalizeCommonFiltersForStorage } from "./lib/report-rules.js";
 import { getRawDatasetBundle, listDatasets } from "./lib/storage.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
@@ -81,6 +82,8 @@ const elements = {
   widgetPageSize: document.querySelector("#widget-page-size"),
   widgetPieLegendThreshold: document.querySelector("#widget-pie-legend-threshold"),
   pieLegendThresholdField: document.querySelector("#pie-legend-threshold-field"),
+  widgetPieShowLegendText: document.querySelector("#widget-pie-show-legend-text"),
+  pieShowLegendTextField: document.querySelector("#pie-show-legend-text-field"),
   widgetSmallValueMode: document.querySelector("#widget-small-value-mode"),
   widgetScale: document.querySelector("#widget-scale"),
   widgetSize: document.querySelector("#widget-size"),
@@ -1026,6 +1029,7 @@ function normalizeWidget(widget) {
     limit: Math.max(0, Number(widget?.limit) || 0),
     pageSize: Math.max(1, Number(widget?.pageSize) || 20),
     pieLegendThreshold: Math.max(1, Number(widget?.pieLegendThreshold) || 6),
+    showLegendText: widget?.showLegendText === true,
     smallValueMode: ["leader", "shrink", "hover"].includes(widget?.smallValueMode)
       ? widget.smallValueMode
       : "leader",
@@ -2571,7 +2575,10 @@ function renderPieChart(pivot) {
     svg.append(path);
     if (pivot.widget.showValues) {
       const middleAngle = (angle + endAngle) / 2;
-      const labelText = `${formatMetric(value)}; ${(share * 100).toFixed(1)}%`;
+      const labelPrefix = pivot.widget.showLegendText
+        ? `${pivot.labels[index]}; `
+        : "";
+      const labelText = `${labelPrefix}${formatMetric(value)}; ${(share * 100).toFixed(1)}%`;
       if (share >= 0.05) {
         const labelPoint = polarToCartesian(cx, cy, radius * 0.66, middleAngle);
         appendSvgText(svg, labelText, labelPoint.x, labelPoint.y + 3, {
@@ -2983,6 +2990,7 @@ function openWidgetDialog(widget = null) {
     limit: 0,
     pageSize: 20,
     pieLegendThreshold: 6,
+    showLegendText: false,
     smallValueMode: "leader",
     scale: 1,
     size: "half"
@@ -2998,6 +3006,7 @@ function openWidgetDialog(widget = null) {
   elements.widgetLimit.value = model.limit;
   elements.widgetPageSize.value = model.pageSize;
   elements.widgetPieLegendThreshold.value = model.pieLegendThreshold;
+  elements.widgetPieShowLegendText.checked = model.showLegendText;
   elements.widgetSmallValueMode.value = model.smallValueMode;
   elements.widgetScale.value = model.scale;
   elements.widgetSize.value = model.size;
@@ -3065,6 +3074,7 @@ function updateWidgetMetricState() {
 function updateWidgetTypeFields() {
   const isPie = elements.widgetType.value === "pie";
   elements.pieLegendThresholdField.hidden = !isPie;
+  elements.pieShowLegendTextField.hidden = !isPie;
 }
 
 function getWidgetColorLabels(model = null) {
@@ -3080,6 +3090,7 @@ function getWidgetColorLabels(model = null) {
     limit: Math.max(0, Number(elements.widgetLimit.value) || 0),
     pageSize: Math.max(1, Number(elements.widgetPageSize.value) || 20),
     pieLegendThreshold: Math.max(1, Number(elements.widgetPieLegendThreshold.value) || 6),
+    showLegendText: elements.widgetPieShowLegendText.checked,
     smallValueMode: elements.widgetSmallValueMode.value,
     axisLabelMode: elements.widgetAxisLabelMode.value,
     showValues: elements.widgetShowValues.checked,
@@ -3152,6 +3163,7 @@ function saveWidgetFromDialog(event) {
     limit: Math.max(0, Number(elements.widgetLimit.value) || 0),
     pageSize: Math.max(1, Number(elements.widgetPageSize.value) || 20),
     pieLegendThreshold: Math.max(1, Number(elements.widgetPieLegendThreshold.value) || 6),
+    showLegendText: elements.widgetPieShowLegendText.checked,
     smallValueMode: elements.widgetSmallValueMode.value,
     scale: Math.min(3, Math.max(0.5, Number(elements.widgetScale.value) || 1)),
     size: elements.widgetSize.value
@@ -3643,7 +3655,10 @@ async function exportDashboardRules() {
     exportedAt: Date.now(),
     requestConfig: cloneJson(state.dataset.requestConfig || null),
     requestName: state.dataset.name || state.dataset.requestConfig?.name || "导入的请求",
-    commonFilters: cloneJson(normalizeCommonFilters(state.commonFilters, state.fieldConfigs)),
+    commonFilters: cloneJson(normalizeCommonFiltersForStorage(
+      normalizeCommonFilters(state.commonFilters, state.fieldConfigs),
+      exportList
+    )),
     fieldMappings: cloneJson(current.fieldMappings),
     templates: cloneJson(exportList)
   };
@@ -3697,7 +3712,10 @@ async function importDashboardRules() {
       ...state.reportTemplates.filter((item) => !imported.some((template) => template.id === item.id)),
       ...imported
     ];
-    state.commonFilters = mergeCommonFilters(state.commonFilters, packageData?.commonFilters);
+    state.commonFilters = mergeCommonFilters(
+      state.commonFilters,
+      normalizeCommonFiltersForStorage(packageData?.commonFilters, imported)
+    );
     await chrome.storage.local.set({
       [STORAGE_KEYS.reportTemplates]: state.reportTemplates,
       [STORAGE_KEYS.commonFilters]: state.commonFilters
