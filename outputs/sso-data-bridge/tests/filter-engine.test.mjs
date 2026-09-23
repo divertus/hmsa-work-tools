@@ -160,6 +160,19 @@ test("Excel XML 导出会转义表格文本", () => {
   );
 });
 
+test("组件副本标题保持唯一", () => {
+  const first = reportHelpers.nextCopiedWidgetTitle("销售额", [
+    { title: "销售额" }
+  ]);
+  const second = reportHelpers.nextCopiedWidgetTitle("销售额", [
+    { title: "销售额" },
+    { title: first }
+  ]);
+
+  assert.equal(first, "销售额 副本");
+  assert.equal(second, "销售额 副本 2");
+});
+
 test("拖拽区域重叠率按目标组件面积计算", () => {
   const target = { left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 };
 
@@ -250,6 +263,7 @@ function createReportHelpers(state = { reportTemplates: [] }) {
     extractFunction("rectangleOverlapRatio"),
     extractFunction("renameCommonFilterReferences"),
     extractFunction("syncCommonFilterToTemplates"),
+    extractFunction("nextCopiedWidgetTitle"),
     extractFunction("escapeXml")
   ].join("\n");
   return new Function(
@@ -262,6 +276,7 @@ function createReportHelpers(state = { reportTemplates: [] }) {
       rectangleOverlapRatio,
       renameCommonFilterReferences,
       syncCommonFilterToTemplates,
+      nextCopiedWidgetTitle,
       escapeXml
     };`
   )(

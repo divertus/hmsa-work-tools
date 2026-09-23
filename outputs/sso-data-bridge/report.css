@@ -782,7 +782,9 @@ body.widget-dragging {
   gap: 3px;
 }
 
-.widget-actions .mini-button[data-action="png"] {
+.widget-actions .mini-button[data-action="png"],
+.widget-actions .mini-button[data-action="copy"],
+.widget-actions .mini-button[data-action="edit"] {
   width: auto;
   padding: 0 6px;
   font-size: 10px;

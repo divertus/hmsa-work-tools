@@ -2295,6 +2295,7 @@ function renderDashboard() {
       createWidgetAction("↑", "up", "上移", index === 0),
       createWidgetAction("↓", "down", "下移", index === state.widgets.length - 1),
       createWidgetAction("PNG", "png", "导出此图表 PNG"),
+      createWidgetAction("复制", "copy", "快速复制组件"),
       createWidgetAction("编辑", "edit", "编辑组件"),
       createWidgetAction("×", "delete", "删除组件")
     );
@@ -2365,10 +2366,47 @@ function handleDashboardAction(event) {
     exportWidgetPng(card, state.widgets[index]);
     return;
   }
+  if (button.dataset.action === "copy") {
+    copyWidget(index);
+    return;
+  }
   if (button.dataset.action === "delete") {
     state.widgets.splice(index, 1);
   }
   renderDashboard();
+}
+
+function copyWidget(index) {
+  const source = state.widgets[index];
+  if (!source) {
+    return;
+  }
+  const copied = normalizeWidget({
+    ...cloneJson(source),
+    id: createId("widget"),
+    title: nextCopiedWidgetTitle(source.title, state.widgets)
+  });
+  state.widgets.splice(index + 1, 0, copied);
+  renderDashboard();
+  requestAnimationFrame(() => {
+    elements.dashboardGrid
+      .querySelector(`.widget-card[data-id="${copied.id}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+  showToast(`已复制组件“${source.title}”。`);
+}
+
+function nextCopiedWidgetTitle(baseTitle, widgets) {
+  const root = `${String(baseTitle || "分析组件").trim()} 副本`;
+  const titles = new Set((widgets || []).map((widget) => String(widget.title || "")));
+  if (!titles.has(root)) {
+    return root;
+  }
+  let index = 2;
+  while (titles.has(`${root} ${index}`)) {
+    index += 1;
+  }
+  return `${root} ${index}`;
 }
 
 function handleWidgetPointerDown(event) {
