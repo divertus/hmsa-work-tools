@@ -28,15 +28,17 @@ const elements = {
   exportPngButton: document.querySelector("#export-png-button"),
   exportHtmlButton: document.querySelector("#export-html-button"),
   exportRulesButton: document.querySelector("#export-rules-button"),
+  exportDashboardRulesButton: document.querySelector("#export-dashboard-rules-button"),
   importRulesButton: document.querySelector("#import-rules-button"),
   exportImmersivePngButton: document.querySelector("#export-immersive-png-button"),
   reportRulesInput: document.querySelector("#report-rules-input"),
   reportSidebar: document.querySelector(".report-sidebar"),
-  reloadDataButton: document.querySelector("#reload-data-button"),
   arrayPathSelect: document.querySelector("#array-path-select"),
   datasetSummary: document.querySelector("#dataset-summary"),
   fieldSearch: document.querySelector("#field-search"),
   fieldCount: document.querySelector("#field-count"),
+  selectAllFieldsButton: document.querySelector("#select-all-fields-button"),
+  invertFieldsButton: document.querySelector("#invert-fields-button"),
   hideUnselectedFieldsButton: document.querySelector("#hide-unselected-fields-button"),
   moveUnselectedFieldsTopButton: document.querySelector("#move-unselected-fields-top-button"),
   fieldList: document.querySelector("#field-list"),
@@ -54,6 +56,7 @@ const elements = {
   filterList: document.querySelector("#filter-list"),
   commonFilterName: document.querySelector("#common-filter-name"),
   saveCommonFilterButton: document.querySelector("#save-common-filter-button"),
+  cancelCommonFilterEditButton: document.querySelector("#cancel-common-filter-edit-button"),
   commonFilterList: document.querySelector("#common-filter-list"),
   addWidgetButton: document.querySelector("#add-widget-button"),
   toggleSidebarButton: document.querySelector("#toggle-sidebar-button"),
@@ -85,8 +88,13 @@ const elements = {
   widgetPieShowLegendText: document.querySelector("#widget-pie-show-legend-text"),
   pieShowLegendTextField: document.querySelector("#pie-show-legend-text-field"),
   widgetSmallValueMode: document.querySelector("#widget-small-value-mode"),
+  smallValueModeField: document.querySelector("#small-value-mode-field"),
   widgetScale: document.querySelector("#widget-scale"),
   widgetSize: document.querySelector("#widget-size"),
+  chartColorEditor: document.querySelector("#chart-color-editor"),
+  kpiColorFields: document.querySelector("#kpi-color-fields"),
+  widgetKpiFontColor: document.querySelector("#widget-kpi-font-color"),
+  widgetKpiBackgroundColor: document.querySelector("#widget-kpi-background-color"),
   widgetColorList: document.querySelector("#widget-color-list"),
   resetWidgetColorsButton: document.querySelector("#reset-widget-colors-button"),
   widgetAddFilterButton: document.querySelector("#widget-add-filter-button"),
@@ -112,6 +120,8 @@ const state = {
   filteredRows: [],
   filters: createFilterGroup("all"),
   commonFilters: [],
+  editingCommonFilterId: null,
+  editingCommonFilterName: "",
   flattenedRowCache: new WeakMap(),
   widgetRowsCache: new Map(),
   widgets: [],
@@ -120,6 +130,14 @@ const state = {
   editingWidgetId: null,
   dialogColors: [],
   editingWidgetFilters: createFilterGroup("all"),
+  draggingWidgetId: null,
+  dropWidgetIndex: null,
+  dragOriginCard: null,
+  dragPreview: null,
+  dragPlaceholder: null,
+  dragStartPoint: null,
+  dragPointerOffset: null,
+  dragMoved: false,
   hiddenSections: {},
   sidebarHidden: false,
   hideUnselectedFields: false,
@@ -192,12 +210,6 @@ async function initialize() {
 }
 
 function bindEvents() {
-  elements.reloadDataButton.addEventListener("click", async () => {
-    await loadDataset(state.datasetId);
-    await rebuildSourceData(true);
-    renderAll();
-  });
-
   elements.arrayPathSelect.addEventListener("change", async () => {
     state.arrayPath = elements.arrayPathSelect.value;
     rebuildFieldConfigsForSource();
@@ -207,6 +219,8 @@ function bindEvents() {
   });
 
   elements.fieldSearch.addEventListener("input", renderFieldList);
+  elements.selectAllFieldsButton.addEventListener("click", selectAllFields);
+  elements.invertFieldsButton.addEventListener("click", invertFieldSelection);
   elements.hideUnselectedFieldsButton.addEventListener("click", toggleHideUnselectedFields);
   elements.moveUnselectedFieldsTopButton.addEventListener("click", moveUnselectedFieldsTop);
   elements.fieldList.addEventListener("change", handleFieldListChange);
@@ -235,6 +249,7 @@ function bindEvents() {
   elements.filterList.addEventListener("input", handleFilterChange);
   elements.filterList.addEventListener("click", handleFilterClick);
   elements.saveCommonFilterButton.addEventListener("click", saveCommonFilter);
+  elements.cancelCommonFilterEditButton.addEventListener("click", cancelCommonFilterEdit);
   elements.commonFilterList.addEventListener("click", handleCommonFilterClick);
 
   elements.addWidgetButton.addEventListener("click", () => openWidgetDialog());
@@ -249,6 +264,7 @@ function bindEvents() {
     renderDashboard();
   });
   elements.dashboardGrid.addEventListener("click", handleDashboardAction);
+  elements.dashboardGrid.addEventListener("pointerdown", handleWidgetPointerDown);
 
   elements.templateSelect.addEventListener("change", async () => {
     const template = state.reportTemplates.find(
@@ -267,7 +283,8 @@ function bindEvents() {
   elements.exportPngButton.addEventListener("click", () => exportDashboardPng(false));
   elements.exportImmersivePngButton.addEventListener("click", () => exportDashboardPng(true));
   elements.exportHtmlButton.addEventListener("click", exportDashboardHtml);
-  elements.exportRulesButton.addEventListener("click", exportDashboardRules);
+  elements.exportRulesButton.addEventListener("click", () => exportDashboardRules(false));
+  elements.exportDashboardRulesButton.addEventListener("click", () => exportDashboardRules(true));
 
   elements.widgetDialogClose.addEventListener("click", closeWidgetDialog);
   elements.widgetCancelButton.addEventListener("click", closeWidgetDialog);
@@ -284,6 +301,8 @@ function bindEvents() {
       return;
     }
     state.dialogColors = [];
+    elements.widgetKpiFontColor.value = "#173d35";
+    elements.widgetKpiBackgroundColor.value = "#f3f6f4";
     renderWidgetColorInputs();
   });
   elements.widgetAddFilterButton.addEventListener("click", () => {
@@ -729,6 +748,7 @@ function createFilterGroup(logic = "all") {
     id: createId("filter-group"),
     type: "group",
     logic,
+    enabled: true,
     children: []
   };
 }
@@ -753,20 +773,19 @@ function recomputeFilteredRows() {
   state.tablePages = {};
 }
 
-function evaluateFilterGroup(group, row) {
-  if (!group || !Array.isArray(group.children) || !group.children.length) {
+function evaluateFilterGroup(group, row, referenceStack = []) {
+  if (
+    !group
+    || group.enabled === false
+    || !Array.isArray(group.children)
+    || !group.children.length
+  ) {
     return true;
   }
 
-  const activeChildren = group.children.filter((child) => (
-    child.enabled === false
-      ? false
-      : child.type === "group"
-        ? true
-        : child.type === "reference"
-          ? Boolean(child.name)
-          : isFilterConditionReady(child)
-  ));
+  const activeChildren = group.children.filter(
+    (child) => isFilterNodeActive(child, referenceStack)
+  );
   if (!activeChildren.length) {
     return true;
   }
@@ -774,9 +793,9 @@ function evaluateFilterGroup(group, row) {
   const results = activeChildren
     .map((child) => (
       child.type === "group"
-        ? evaluateFilterGroup(child, row)
+        ? evaluateFilterGroup(child, row, referenceStack)
         : child.type === "reference"
-          ? evaluateCommonFilterReference(child, row)
+          ? evaluateCommonFilterReference(child, row, referenceStack)
           : child.field
             ? matchesFilter(row, child)
             : true
@@ -785,9 +804,43 @@ function evaluateFilterGroup(group, row) {
   return group.logic === "any" ? results.some(Boolean) : results.every(Boolean);
 }
 
-function evaluateCommonFilterReference(reference, row) {
+function isFilterNodeActive(node, referenceStack = []) {
+  if (!node || node.enabled === false) {
+    return false;
+  }
+  if (node.type === "group") {
+    return Array.isArray(node.children)
+      && node.children.some((child) => isFilterNodeActive(child, referenceStack));
+  }
+  if (node.type === "reference") {
+    return Boolean(node.name) && isCommonFilterActive(node.name, referenceStack);
+  }
+  return isFilterConditionReady(node);
+}
+
+function isCommonFilterActive(name, referenceStack = []) {
+  if (referenceStack.includes(name)) {
+    return true;
+  }
+  const common = state.commonFilters.find((item) => item.name === name);
+  return Boolean(
+    common
+    && common.group?.enabled !== false
+    && Array.isArray(common.group?.children)
+    && common.group.children.some(
+      (child) => isFilterNodeActive(child, [...referenceStack, name])
+    )
+  );
+}
+
+function evaluateCommonFilterReference(reference, row, referenceStack = []) {
+  if (!reference.name || referenceStack.includes(reference.name)) {
+    return false;
+  }
   const common = state.commonFilters.find((item) => item.name === reference.name);
-  return common ? evaluateFilterGroup(common.group, row) : true;
+  return common
+    ? evaluateFilterGroup(common.group, row, [...referenceStack, reference.name])
+    : false;
 }
 
 function isFilterConditionReady(condition) {
@@ -1025,6 +1078,8 @@ function normalizeWidget(widget) {
     axisLabelMode: widget?.axisLabelMode === "wrap" ? "wrap" : "scroll",
     showValues: widget?.showValues !== false,
     colors: Array.isArray(widget?.colors) ? widget.colors.filter(isHexColor).slice(0, 40) : [],
+    kpiFontColor: isHexColor(widget?.kpiFontColor) ? widget.kpiFontColor : "",
+    kpiBackgroundColor: isHexColor(widget?.kpiBackgroundColor) ? widget.kpiBackgroundColor : "",
     filters: widget?.filters ? cloneJson(widget.filters) : createFilterGroup("all"),
     limit: Math.max(0, Number(widget?.limit) || 0),
     pageSize: Math.max(1, Number(widget?.pageSize) || 20),
@@ -1296,6 +1351,28 @@ function toggleHideUnselectedFields() {
   renderFieldList();
 }
 
+function selectAllFields() {
+  state.fieldConfigs.forEach((field) => {
+    field.selected = true;
+  });
+  applyFieldSelectionChange();
+}
+
+function invertFieldSelection() {
+  state.fieldConfigs.forEach((field) => {
+    field.selected = !field.selected;
+  });
+  applyFieldSelectionChange();
+}
+
+function applyFieldSelectionChange() {
+  ensureWidgetsUseValidFields();
+  renderFieldList();
+  renderMappingEditor();
+  renderFilterList();
+  renderDashboard();
+}
+
 function moveUnselectedFieldsTop() {
   const unselected = state.fieldConfigs.filter((field) => !field.selected);
   const selected = state.fieldConfigs.filter((field) => field.selected);
@@ -1331,9 +1408,7 @@ function handleFieldListChange(event) {
 
   if (event.target.dataset.action === "select") {
     field.selected = event.target.checked;
-    item.classList.toggle("is-selected", field.selected);
-    elements.fieldCount.textContent = `${state.fieldConfigs.filter((entry) => entry.selected).length} / ${state.fieldConfigs.length}`;
-    renderDashboard();
+    applyFieldSelectionChange();
   }
 
   if (event.target.dataset.action === "alias") {
@@ -1588,6 +1663,12 @@ function getDistinctFieldValues(field) {
 }
 
 function renderCommonFilterList() {
+  if (
+    state.editingCommonFilterId
+    && !state.commonFilters.some((item) => item.id === state.editingCommonFilterId)
+  ) {
+    clearCommonFilterEditState();
+  }
   elements.commonFilterList.replaceChildren();
   if (!state.commonFilters.length) {
     const empty = document.createElement("p");
@@ -1599,7 +1680,7 @@ function renderCommonFilterList() {
 
   for (const common of state.commonFilters) {
     const item = document.createElement("div");
-    item.className = "common-filter-item";
+    item.className = `common-filter-item${common.id === state.editingCommonFilterId ? " is-editing" : ""}`;
     item.dataset.name = common.name;
     const name = document.createElement("code");
     name.textContent = common.name;
@@ -1615,7 +1696,7 @@ function renderCommonFilterList() {
     load.type = "button";
     load.className = "text-button";
     load.dataset.action = "loadCommonFilter";
-    load.textContent = "载入";
+    load.textContent = common.id === state.editingCommonFilterId ? "重新载入" : "编辑并载入";
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "text-button";
@@ -1628,26 +1709,46 @@ function renderCommonFilterList() {
 }
 
 async function saveCommonFilter() {
-  const name = elements.commonFilterName.value.trim();
+  const editing = state.commonFilters.find((item) => item.id === state.editingCommonFilterId) || null;
+  const previousName = editing?.name || "";
+  const name = elements.commonFilterName.value.trim() || editing?.name || "";
   if (!name) {
     showToast("请输入常用条件名称。");
     return;
   }
-  if (state.commonFilters.some((item) => item.name === name)) {
+  if (state.commonFilters.some((item) => item.name === name && item.id !== editing?.id)) {
     showToast("常用条件名称必须唯一，请更换名称。");
     return;
   }
-  state.commonFilters.push({
-    id: createId("common-filter"),
-    name,
-    group: cloneJson(state.filters)
-  });
-  elements.commonFilterName.value = "";
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.commonFilters]: state.commonFilters
-  });
+  if (editing) {
+    editing.group = cloneJson(state.filters);
+    if (name !== previousName) {
+      renameCommonFilterReferencesInState(previousName, name);
+    }
+    editing.name = name;
+    syncCommonFilterToTemplates(editing, previousName);
+    state.editingCommonFilterName = name;
+  } else {
+    state.commonFilters.push({
+      id: createId("common-filter"),
+      name,
+      group: cloneJson(state.filters)
+    });
+  }
+  await chrome.storage.local.set(editing
+    ? {
+      [STORAGE_KEYS.commonFilters]: state.commonFilters,
+      [STORAGE_KEYS.reportTemplates]: state.reportTemplates
+    }
+    : {
+      [STORAGE_KEYS.commonFilters]: state.commonFilters
+    });
+  cancelCommonFilterEdit();
   renderCommonFilterList();
-  showToast(`常用条件“${name}”已保存。`);
+  renderFilterList();
+  renderWidgetFilterEditor();
+  renderDashboard();
+  showToast(editing ? `常用条件“${name}”已更新。` : `常用条件“${name}”已保存。`);
 }
 
 function handleCommonFilterClick(event) {
@@ -1661,10 +1762,7 @@ function handleCommonFilterClick(event) {
     return;
   }
   if (button.dataset.action === "loadCommonFilter") {
-    state.filters = normalizeFilters(common.group, state.fieldConfigs);
-    renderFilterList();
-    recomputeFilteredRows();
-    renderDashboard();
+    beginCommonFilterEdit(common);
     return;
   }
   if (button.dataset.action === "deleteCommonFilter") {
@@ -1672,11 +1770,89 @@ function handleCommonFilterClick(event) {
       return;
     }
     state.commonFilters = state.commonFilters.filter((entry) => entry.id !== common.id);
+    if (state.editingCommonFilterId === common.id) {
+      cancelCommonFilterEdit();
+    }
     chrome.storage.local.set({
       [STORAGE_KEYS.commonFilters]: state.commonFilters
     });
     renderCommonFilterList();
+    renderWidgetFilterEditor();
+    renderDashboard();
     showToast("常用条件已删除。");
+  }
+}
+
+function beginCommonFilterEdit(common) {
+  state.editingCommonFilterId = common.id;
+  state.editingCommonFilterName = common.name;
+  elements.commonFilterName.value = common.name;
+  elements.saveCommonFilterButton.textContent = "更新常用条件";
+  elements.cancelCommonFilterEditButton.hidden = false;
+  state.filters = normalizeFilters(common.group, state.fieldConfigs);
+  renderFilterList();
+  renderCommonFilterList();
+  recomputeFilteredRows();
+  renderDashboard();
+}
+
+function cancelCommonFilterEdit() {
+  clearCommonFilterEditState();
+  renderCommonFilterList();
+}
+
+function clearCommonFilterEditState() {
+  state.editingCommonFilterId = null;
+  state.editingCommonFilterName = "";
+  elements.commonFilterName.value = "";
+  elements.saveCommonFilterButton.textContent = "保存当前条件";
+  elements.cancelCommonFilterEditButton.hidden = true;
+}
+
+function renameCommonFilterReferencesInState(oldName, newName) {
+  if (!oldName || !newName || oldName === newName) {
+    return;
+  }
+  const roots = [
+    state.filters,
+    state.editingWidgetFilters,
+    ...state.commonFilters.map((item) => item.group),
+    ...state.widgets.map((widget) => widget.filters),
+    ...state.reportTemplates.flatMap((template) => [
+      template.filters,
+      ...(Array.isArray(template.commonFilters) ? template.commonFilters : [])
+        .map((item) => item.group || item.filters || item),
+      ...(Array.isArray(template.widgets) ? template.widgets : [])
+        .map((widget) => widget.filters)
+    ])
+  ];
+  roots.forEach((root) => renameCommonFilterReferences(root, oldName, newName));
+}
+
+function syncCommonFilterToTemplates(commonFilter, previousName) {
+  for (const template of state.reportTemplates) {
+    for (const item of Array.isArray(template.commonFilters) ? template.commonFilters : []) {
+      if (item.id === commonFilter.id || item.name === previousName || item.name === commonFilter.name) {
+        item.id = commonFilter.id;
+        item.name = commonFilter.name;
+        item.group = cloneJson(commonFilter.group);
+      }
+    }
+  }
+}
+
+function renameCommonFilterReferences(node, oldName, newName) {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  if (node.type === "reference" && node.name === oldName) {
+    node.name = newName;
+  }
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child) => renameCommonFilterReferences(child, oldName, newName));
+  }
+  if (Array.isArray(node.conditions)) {
+    node.conditions.forEach((child) => renameCommonFilterReferences(child, oldName, newName));
   }
 }
 
@@ -2058,6 +2234,9 @@ function handleWidgetFilterClick(event) {
 }
 
 function renderDashboard() {
+  if (state.draggingWidgetId) {
+    cancelWidgetDrag();
+  }
   state.widgetRowsCache.clear();
   const selectedFields = getSelectedFieldPaths();
   elements.analysisSummary.replaceChildren();
@@ -2078,8 +2257,16 @@ function renderDashboard() {
 
   state.widgets.forEach((widget, index) => {
     const card = document.createElement("article");
-    card.className = `widget-card${widget.size === "full" ? " widget-full" : ""}`;
+    card.className = [
+      "widget-card",
+      widget.size === "full" ? "widget-full" : "",
+      widget.type === "kpi" ? "widget-kpi-card" : ""
+    ].filter(Boolean).join(" ");
     card.dataset.id = widget.id;
+    if (widget.type === "kpi") {
+      card.style.setProperty("--kpi-font-color", widget.kpiFontColor || "#173d35");
+      card.style.setProperty("--kpi-background-color", widget.kpiBackgroundColor || "#f3f6f4");
+    }
     card.style.setProperty(
       "--widget-scale",
       String(widget.type === "pie" ? 1 : widget.scale || 1)
@@ -2097,7 +2284,14 @@ function renderDashboard() {
 
     const actions = document.createElement("div");
     actions.className = "widget-actions";
+    const dragHandle = document.createElement("span");
+    dragHandle.className = "widget-drag-handle";
+    dragHandle.textContent = "⠿";
+    dragHandle.title = "拖动组件排序";
+    dragHandle.setAttribute("aria-hidden", "true");
+    dragHandle.draggable = false;
     actions.append(
+      dragHandle,
       createWidgetAction("↑", "up", "上移", index === 0),
       createWidgetAction("↓", "down", "下移", index === state.widgets.length - 1),
       createWidgetAction("PNG", "png", "导出此图表 PNG"),
@@ -2152,6 +2346,10 @@ function handleDashboardAction(event) {
     renderDashboard();
     return;
   }
+  if (button.dataset.action === "tableExport") {
+    exportTableExcel(state.widgets[index], getWidgetRows(state.widgets[index]));
+    return;
+  }
 
   if (button.dataset.action === "up" && index > 0) {
     [state.widgets[index - 1], state.widgets[index]] = [state.widgets[index], state.widgets[index - 1]];
@@ -2173,10 +2371,216 @@ function handleDashboardAction(event) {
   renderDashboard();
 }
 
+function handleWidgetPointerDown(event) {
+  if (event.button !== 0 || !event.target.closest(".widget-drag-handle")) {
+    return;
+  }
+  const card = event.target.closest(".widget-card");
+  if (!card || !state.widgets.some((widget) => widget.id === card.dataset.id)) {
+    return;
+  }
+  event.preventDefault();
+  const rect = card.getBoundingClientRect();
+  state.draggingWidgetId = card.dataset.id;
+  state.dropWidgetIndex = state.widgets.findIndex((widget) => widget.id === card.dataset.id);
+  state.dragOriginCard = card;
+  state.dragStartPoint = { x: event.clientX, y: event.clientY };
+  state.dragPointerOffset = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+  state.dragMoved = false;
+  window.addEventListener("pointermove", handleWidgetPointerMove, { passive: false });
+  window.addEventListener("pointerup", handleWidgetPointerUp);
+  window.addEventListener("pointercancel", handleWidgetPointerUp);
+}
+
+function handleWidgetPointerMove(event) {
+  if (!state.draggingWidgetId) {
+    return;
+  }
+  if (
+    !state.dragMoved
+    && Math.hypot(
+      event.clientX - state.dragStartPoint.x,
+      event.clientY - state.dragStartPoint.y
+    ) < 5
+  ) {
+    return;
+  }
+  event.preventDefault();
+  state.dragMoved = true;
+  activateWidgetDrag();
+  if (!state.dragPreview) {
+    return;
+  }
+  state.dragPreview.style.left = `${event.clientX - state.dragPointerOffset.x}px`;
+  state.dragPreview.style.top = `${event.clientY - state.dragPointerOffset.y}px`;
+  updateWidgetDropPlaceholder(event);
+}
+
+function activateWidgetDrag() {
+  if (state.dragPreview || !state.dragOriginCard) {
+    return;
+  }
+  const widget = state.widgets.find((item) => item.id === state.draggingWidgetId);
+  if (!widget) {
+    cancelWidgetDrag();
+    return;
+  }
+  const card = state.dragOriginCard;
+  const rect = card.getBoundingClientRect();
+  card.classList.add("is-drag-origin");
+  document.body.classList.add("widget-dragging");
+
+  const preview = document.createElement("div");
+  preview.className = `widget-drag-preview${widget.size === "full" ? " widget-full" : ""}`;
+  preview.style.width = `${Math.max(220, Math.min(360, rect.width))}px`;
+  const previewTitle = document.createElement("strong");
+  previewTitle.textContent = widget.title;
+  const previewMeta = document.createElement("span");
+  previewMeta.textContent = widgetSubtitle(widget);
+  preview.append(previewTitle, previewMeta);
+
+  const placeholder = document.createElement("div");
+  placeholder.className = `widget-drop-placeholder${widget.size === "full" ? " widget-full" : ""}`;
+  placeholder.style.minHeight = `${Math.max(140, rect.height)}px`;
+  placeholder.innerHTML = "<span>放置到此处</span>";
+
+  state.dragPreview = preview;
+  state.dragPlaceholder = placeholder;
+  document.body.append(preview);
+  const previewRect = preview.getBoundingClientRect();
+  state.dragPointerOffset = {
+    x: Math.max(12, Math.min(state.dragPointerOffset.x, previewRect.width - 12)),
+    y: Math.max(12, Math.min(state.dragPointerOffset.y, previewRect.height))
+  };
+}
+
+function updateWidgetDropPlaceholder(event) {
+  if (!state.dragPreview || !state.dragPlaceholder) {
+    return;
+  }
+  const previewRect = state.dragPreview.getBoundingClientRect();
+  const cards = [...elements.dashboardGrid.querySelectorAll(".widget-card")]
+    .filter((card) => card.dataset.id !== state.draggingWidgetId);
+  if (!cards.length) {
+    elements.dashboardGrid.append(state.dragPlaceholder);
+    state.dropWidgetIndex = 0;
+    return;
+  }
+
+  let targetCard = null;
+  let bestOverlap = 0;
+  for (const card of cards) {
+    const ratio = rectangleOverlapRatio(previewRect, card.getBoundingClientRect());
+    if (ratio > bestOverlap) {
+      bestOverlap = ratio;
+      targetCard = card;
+    }
+  }
+
+  const gridRect = elements.dashboardGrid.getBoundingClientRect();
+  if (bestOverlap < 0.1) {
+    if (previewRect.top < gridRect.top + 28) {
+      targetCard = cards[0];
+    } else if (previewRect.bottom > gridRect.bottom - 28) {
+      elements.dashboardGrid.append(state.dragPlaceholder);
+      state.dropWidgetIndex = state.widgets.length - 1;
+      return;
+    } else {
+      targetCard = cards.reduce((closest, card) => {
+        const rect = card.getBoundingClientRect();
+        const distance = Math.hypot(
+          event.clientX - (rect.left + rect.width / 2),
+          event.clientY - (rect.top + rect.height / 2)
+        );
+        return !closest || distance < closest.distance ? { card, distance } : closest;
+      }, null)?.card || null;
+    }
+  }
+
+  if (!targetCard) {
+    return;
+  }
+  const targetRect = targetCard.getBoundingClientRect();
+  const sameRow = event.clientY >= targetRect.top && event.clientY <= targetRect.bottom;
+  const insertAfter = sameRow
+    ? event.clientX > targetRect.left + targetRect.width / 2
+    : event.clientY > targetRect.top + targetRect.height / 2;
+  const baseWidgets = state.widgets.filter((widget) => widget.id !== state.draggingWidgetId);
+  const targetIndex = baseWidgets.findIndex((widget) => widget.id === targetCard.dataset.id);
+  if (targetIndex < 0) {
+    return;
+  }
+  state.dropWidgetIndex = targetIndex + (insertAfter ? 1 : 0);
+  if (insertAfter) {
+    targetCard.after(state.dragPlaceholder);
+  } else {
+    elements.dashboardGrid.insertBefore(state.dragPlaceholder, targetCard);
+  }
+}
+
+function handleWidgetPointerUp(event) {
+  if (!state.draggingWidgetId) {
+    return;
+  }
+  const shouldCommit = state.dragMoved && Number.isInteger(state.dropWidgetIndex);
+  if (shouldCommit) {
+    const dragged = state.widgets.find((widget) => widget.id === state.draggingWidgetId);
+    if (dragged) {
+      const remaining = state.widgets.filter((widget) => widget.id !== state.draggingWidgetId);
+      const index = Math.max(0, Math.min(remaining.length, state.dropWidgetIndex));
+      remaining.splice(index, 0, dragged);
+      state.widgets = remaining;
+    }
+  }
+  cancelWidgetDrag();
+  if (shouldCommit) {
+    renderDashboard();
+  }
+}
+
+function cancelWidgetDrag() {
+  window.removeEventListener("pointermove", handleWidgetPointerMove);
+  window.removeEventListener("pointerup", handleWidgetPointerUp);
+  window.removeEventListener("pointercancel", handleWidgetPointerUp);
+  state.dragOriginCard?.classList.remove("is-drag-origin");
+  state.dragPreview?.remove();
+  state.dragPlaceholder?.remove();
+  document.body.classList.remove("widget-dragging");
+  state.draggingWidgetId = null;
+  state.dropWidgetIndex = null;
+  state.dragOriginCard = null;
+  state.dragPreview = null;
+  state.dragPlaceholder = null;
+  state.dragStartPoint = null;
+  state.dragPointerOffset = null;
+  state.dragMoved = false;
+}
+
+function rectangleOverlapRatio(leftRect, rightRect) {
+  const width = Math.max(
+    0,
+    Math.min(leftRect.right, rightRect.right) - Math.max(leftRect.left, rightRect.left)
+  );
+  const height = Math.max(
+    0,
+    Math.min(leftRect.bottom, rightRect.bottom) - Math.max(leftRect.top, rightRect.top)
+  );
+  const targetArea = Math.max(1, rightRect.width * rightRect.height);
+  return (width * height) / targetArea;
+}
+
 function renderWidgetBody(container, widget) {
   container.replaceChildren();
   const widgetRows = getWidgetRows(widget);
   if (!widgetRows.length) {
+    if (widget.type === "table") {
+      container.classList.remove("is-empty");
+      renderDetailTable(container, widget, widgetRows);
+      return;
+    }
     container.classList.add("is-empty");
     container.textContent = "当前筛选条件下没有数据。";
     return;
@@ -2193,6 +2597,13 @@ function renderWidgetBody(container, widget) {
     span.textContent = widget.aggregation === "count"
       ? "筛选后的记录数"
       : `${aggregationLabel(widget.aggregation)} ${fieldLabel(widget.metricField)}`;
+    if (widget.kpiFontColor) {
+      container.style.color = widget.kpiFontColor;
+    }
+    if (widget.kpiBackgroundColor) {
+      container.style.background = widget.kpiBackgroundColor;
+      container.style.borderRadius = "6px";
+    }
     wrapper.append(strong, span);
     container.append(wrapper);
     return;
@@ -2326,33 +2737,104 @@ function renderDetailTable(container, widget, widgetRows = getWidgetRows(widget)
     }
     tbody.append(tr);
   }
+  if (!widgetRows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = Math.max(1, fields.length);
+    td.className = "table-empty-cell";
+    td.textContent = "当前筛选条件下没有数据。";
+    tr.append(td);
+    tbody.append(tr);
+  }
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);
 
-  if (totalPages > 1) {
-    const controls = document.createElement("div");
-    controls.className = "table-pagination";
-    const previous = document.createElement("button");
-    previous.type = "button";
-    previous.className = "mini-button";
-    previous.dataset.action = "tablePrev";
-    previous.textContent = "上一页";
-    previous.disabled = currentPage <= 1;
+  const controls = document.createElement("div");
+  controls.className = "table-pagination";
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.className = "mini-button";
+  previous.dataset.action = "tablePrev";
+  previous.textContent = "上一页";
+  previous.disabled = currentPage <= 1;
 
-    const status = document.createElement("span");
-    status.textContent = `第 ${currentPage} / ${totalPages} 页`;
+  const status = document.createElement("span");
+  status.className = "table-page-status";
+  status.textContent = `第 ${currentPage} / ${totalPages} 页 · 每页 ${pageSize} 条 · 共 ${widgetRows.length} 条`;
 
-    const next = document.createElement("button");
-    next.type = "button";
-    next.className = "mini-button";
-    next.dataset.action = "tableNext";
-    next.textContent = "下一页";
-    next.disabled = currentPage >= totalPages;
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "mini-button";
+  next.dataset.action = "tableNext";
+  next.textContent = "下一页";
+  next.disabled = currentPage >= totalPages;
 
-    controls.append(previous, status, next);
-    container.append(controls);
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.className = "mini-button table-export-button";
+  exportButton.dataset.action = "tableExport";
+  exportButton.textContent = "导出 Excel";
+
+  controls.append(status, previous, next, exportButton);
+  container.append(controls);
+}
+
+function exportTableExcel(widget, rows) {
+  const fields = getSelectedFields();
+  if (!fields.length) {
+    showToast("没有可导出的字段。");
+    return;
   }
+
+  const header = fields
+    .map((field) => excelCell(field.label, "String"))
+    .join("");
+  const body = rows.map((row) => {
+    const flattened = getFlattenedRow(row);
+    return `<Row>${fields.map((field) => {
+      const value = flattened[field.path];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return excelCell(value, "Number");
+      }
+      if (typeof value === "boolean") {
+        return excelCell(value ? "TRUE" : "FALSE", "Boolean");
+      }
+      const text = value === undefined || value === null || value === ""
+        ? ""
+        : displayValue(value);
+      return excelCell(text, "String");
+    }).join("")}</Row>`;
+  }).join("");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="数据">
+    <Table>
+      <Row>${header}</Row>
+      ${body}
+    </Table>
+  </Worksheet>
+</Workbook>`;
+  downloadBlob(
+    new Blob([`\ufeff${xml}`], { type: "application/vnd.ms-excel;charset=utf-8" }),
+    `${safeFileName(widget.title)}-全部数据.xls`
+  );
+  showToast(`已导出 ${rows.length} 条数据到 Excel。`);
+}
+
+function excelCell(value, type) {
+  return `<Cell><Data ss:Type="${type}">${escapeXml(value)}</Data></Cell>`;
+}
+
+function escapeXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 function renderPivotTable(container, pivot) {
@@ -2418,7 +2900,7 @@ function renderBarChart(pivot, stacked) {
   const minSlot = axisLabelMode === "wrap"
     ? Math.min(220, Math.max(84, longestLabel * 7))
     : Math.max(64, longestLabel * 7 + 14);
-  const leaderPadding = stacked && widget.smallValueMode === "leader" ? 120 : 22;
+  const leaderPadding = widget.smallValueMode === "leader" ? 120 : 22;
   const labelTextWidth = longestLabel * 7;
   const labelBottom = axisLabelMode === "wrap"
     ? Math.max(92, Math.ceil(longestLabel / 9) * 13 + 24)
@@ -2445,6 +2927,7 @@ function renderBarChart(pivot, stacked) {
   const step = plotWidth / Math.max(1, pivot.labels.length);
   const groupWidth = Math.min(64, step * 0.76);
   const seriesCount = Math.max(1, pivot.seriesNames.length);
+  const leaderTracks = { left: [], right: [] };
 
   drawAxes(svg, margin, plotWidth, plotHeight, maxValue);
 
@@ -2465,36 +2948,26 @@ function renderBarChart(pivot, stacked) {
           fill: getWidgetColor(widget, seriesIndex),
           rx: 2
         });
-        segment.append(createTitleNode(`${series}: ${formatMetric(value)}`));
-        if (widget.showValues && barHeight >= 14) {
-          appendSvgText(svg, formatMetric(value), xCenter, y + barHeight / 2 + 3, {
-            anchor: "middle",
-            fill: "#ffffff",
-            size: 9
-          });
-        } else if (widget.showValues && widget.smallValueMode === "shrink" && barHeight >= 7) {
-          appendSvgText(svg, formatMetric(value), xCenter, y + barHeight / 2 + 2, {
-            anchor: "middle",
-            fill: "#ffffff",
-            size: Math.max(6, Math.min(8, barHeight - 2))
-          });
-        } else if (widget.showValues && widget.smallValueMode === "leader" && barHeight > 0) {
-          const direction = seriesIndex % 2 === 0 ? 1 : -1;
-          const endY = Math.max(
-            margin.top + 8,
-            Math.min(margin.top + plotHeight - 8, y + barHeight / 2 + (seriesIndex % 3 - 1) * 12)
-          );
-          const endX = xCenter + direction * (barWidth / 2 + 42 + (seriesIndex % 3) * 18);
-          appendSvg(svg, "polyline", {
-            points: `${xCenter},${y + barHeight / 2} ${xCenter + direction * (barWidth / 2 + 9)},${endY} ${endX},${endY}`,
-            fill: "none",
-            stroke: "#73827a",
-            "stroke-width": 0.8
-          });
-          appendSvgText(svg, formatMetric(value), endX + direction * 3, endY + 3, {
-            anchor: direction > 0 ? "start" : "end",
-            fill: "#46544d",
-            size: 8
+        setChartTooltipElement(
+          segment,
+          `${series}: ${formatMetric(value)}`,
+          { x: xCenter, y: y + barHeight / 2 }
+        );
+        if (widget.showValues) {
+          appendBarValueLabel(svg, {
+            mode: widget.smallValueMode,
+            text: formatMetric(value),
+            x: xCenter,
+            y,
+            barWidth,
+            barHeight,
+            plotTop: margin.top,
+            plotBottom: margin.top + plotHeight,
+            chartWidth: width,
+            seriesIndex,
+            leaderTracks,
+            position: "inside",
+            largeThreshold: 14
           });
         }
         cumulative += barHeight;
@@ -2522,12 +2995,27 @@ function renderBarChart(pivot, stacked) {
             : getWidgetColor(widget, seriesIndex),
           rx: 2
         });
-        bar.append(createTitleNode(`${label}: ${formatMetric(value)}`));
-        if (widget.showValues && barHeight >= 12) {
-          appendSvgText(svg, formatMetric(value), x + barWidth / 2, margin.top + plotHeight - barHeight - 5, {
-            anchor: "middle",
-            fill: "#35443d",
-            size: 9
+        setChartTooltipElement(
+          bar,
+          `${label}: ${formatMetric(value)}`,
+          { x: x + barWidth / 2, y: margin.top + plotHeight - barHeight / 2 }
+        );
+        if (widget.showValues) {
+          appendBarValueLabel(svg, {
+            mode: widget.smallValueMode,
+            text: formatMetric(value),
+            x: x + barWidth / 2,
+            y: margin.top + plotHeight - barHeight,
+            barWidth,
+            barHeight,
+            plotTop: margin.top,
+            plotBottom: margin.top + plotHeight,
+            chartWidth: width,
+            seriesIndex,
+            leaderTracks,
+            position: "above",
+            largeThreshold: 12,
+            largeFill: "#35443d"
           });
         }
       });
@@ -2543,6 +3031,7 @@ function renderBarChart(pivot, stacked) {
   const container = document.createElement("div");
   container.className = "chart-scroll";
   container.append(svg);
+  attachChartTooltip(container, svg);
   return { container, legend };
 }
 
@@ -2557,7 +3046,7 @@ function renderPieChart(pivot) {
   const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
   const svg = createChartSvg(width, height, "饼图");
   let angle = -Math.PI / 2;
-  const sideOffsets = { left: 0, right: 0 };
+  const leaderTracks = { left: [], right: [] };
 
   values.forEach((value, index) => {
     const share = total > 0 ? Math.max(0, value) / total : 0;
@@ -2565,37 +3054,52 @@ function renderPieChart(pivot) {
       return;
     }
     const endAngle = angle + share * Math.PI * 2;
+    const middleAngle = (angle + endAngle) / 2;
+    const labelPrefix = pivot.widget.showLegendText
+      ? `${pivot.labels[index]}; `
+      : "";
+    const labelText = `${labelPrefix}${formatMetric(value)}; ${(share * 100).toFixed(1)}%`;
     const path = createSvg("path", {
       d: describeArc(cx, cy, radius, angle, endAngle),
       fill: getWidgetColor(pivot.widget, index),
       stroke: "#ffffff",
       "stroke-width": 2
     });
-    path.append(createTitleNode(`${pivot.labels[index]}: ${formatMetric(value)}`));
+    setChartTooltipElement(
+      path,
+      pivot.widget.showLegendText
+        ? labelText
+        : `${pivot.labels[index]}: ${labelText}`,
+      polarToCartesian(cx, cy, radius * 0.72, middleAngle)
+    );
     svg.append(path);
     if (pivot.widget.showValues) {
-      const middleAngle = (angle + endAngle) / 2;
-      const labelPrefix = pivot.widget.showLegendText
-        ? `${pivot.labels[index]}; `
-        : "";
-      const labelText = `${labelPrefix}${formatMetric(value)}; ${(share * 100).toFixed(1)}%`;
-      if (share >= 0.05) {
+      const mode = pivot.widget.smallValueMode || "leader";
+      if (share >= 0.05 || mode === "shrink") {
+        const arcWidth = Math.max(4, share * Math.PI * 2 * radius * 0.66);
+        const size = share >= 0.05
+          ? 10
+          : Math.max(3, Math.min(10, arcWidth / Math.max(3, labelText.length * 0.62)));
         const labelPoint = polarToCartesian(cx, cy, radius * 0.66, middleAngle);
         appendSvgText(svg, labelText, labelPoint.x, labelPoint.y + 3, {
           anchor: "middle",
           fill: "#ffffff",
-          size: 10
+          size,
+          textLength: Math.max(4, arcWidth * 0.86),
+          lengthAdjust: "spacingAndGlyphs"
         });
-      } else {
+      } else if (mode === "leader") {
         const side = Math.cos(middleAngle) >= 0 ? "right" : "left";
         const direction = side === "right" ? 1 : -1;
-        const rank = sideOffsets[side]++;
         const start = polarToCartesian(cx, cy, radius * 0.94, middleAngle);
         const elbow = polarToCartesian(cx, cy, radius + 20, middleAngle);
         const baseY = cy + Math.sin(middleAngle) * radius;
-        const endY = Math.max(
+        const endY = allocateLeaderTrack(
+          baseY,
+          leaderTracks[side],
           20,
-          Math.min(height - 38, baseY + (rank % 5 - 2) * 15)
+          height - 38,
+          15
         );
         const endX = cx + direction * (radius + 76);
         appendSvg(svg, "polyline", {
@@ -2628,7 +3132,31 @@ function renderPieChart(pivot) {
   const container = document.createElement("div");
   container.className = "chart-scroll";
   container.append(svg);
+  attachChartTooltip(container, svg);
   return { container, legend };
+}
+
+function allocateLeaderTrack(preferred, tracks, min, max, gap) {
+  const clamp = (value) => Math.max(min, Math.min(max, value));
+  let candidate = clamp(preferred);
+  const isFree = (value) => tracks.every((track) => Math.abs(track - value) >= gap - 1);
+  if (isFree(candidate)) {
+    tracks.push(candidate);
+    tracks.sort((a, b) => a - b);
+    return candidate;
+  }
+
+  for (let step = 1; step <= 30; step += 1) {
+    for (const direction of [1, -1]) {
+      candidate = clamp(preferred + direction * step * gap);
+      if (isFree(candidate)) {
+        tracks.push(candidate);
+        tracks.sort((a, b) => a - b);
+        return candidate;
+      }
+    }
+  }
+  return clamp(preferred);
 }
 
 function renderLineChart(pivot) {
@@ -2769,22 +3297,179 @@ function appendSvgRect(svg, attributes) {
 }
 
 function appendSvgText(svg, text, x, y, options = {}) {
-  const element = appendSvg(svg, "text", {
+  const attributes = {
     x,
     y,
     "text-anchor": options.anchor || "start",
     fill: options.fill || "#28352f",
     "font-size": options.size || 11,
     "font-family": "Inter, PingFang SC, Microsoft YaHei, sans-serif"
-  });
+  };
+  if (options.textLength) {
+    attributes.textLength = options.textLength;
+  }
+  if (options.lengthAdjust) {
+    attributes.lengthAdjust = options.lengthAdjust;
+  }
+  const element = appendSvg(svg, "text", attributes);
   element.textContent = text;
   return element;
+}
+
+function appendBarValueLabel(svg, options) {
+  const {
+    mode = "leader",
+    text,
+    x,
+    y,
+    barWidth,
+    barHeight,
+    plotTop,
+    plotBottom,
+    chartWidth,
+    seriesIndex = 0,
+    leaderTracks = null,
+    position = "inside",
+    largeThreshold = 12,
+    largeFill = "#ffffff"
+  } = options;
+  if (!text || barHeight <= 0) {
+    return;
+  }
+
+  if (barHeight >= largeThreshold) {
+    appendSvgText(
+      svg,
+      text,
+      x,
+      position === "above" ? y - 5 : y + barHeight / 2 + 3,
+      {
+        anchor: "middle",
+        fill: largeFill,
+        size: 9
+      }
+    );
+    return;
+  }
+
+  if (mode === "hover") {
+    return;
+  }
+
+  if (mode === "shrink") {
+    const size = Math.max(3, Math.min(9, barHeight, barWidth - 2));
+    appendSvgText(svg, text, x, y + Math.max(4, barHeight / 2 + 2), {
+      anchor: "middle",
+      fill: "#ffffff",
+      size,
+      textLength: Math.max(4, barWidth - 2),
+      lengthAdjust: "spacingAndGlyphs"
+    });
+    return;
+  }
+
+  const direction = seriesIndex % 2 === 0 ? 1 : -1;
+  const centerY = y + barHeight / 2;
+  const side = direction > 0 ? "right" : "left";
+  const preferredY = centerY + (seriesIndex % 3 - 1) * 12;
+  const endY = leaderTracks?.[side]
+    ? allocateLeaderTrack(preferredY, leaderTracks[side], plotTop + 8, plotBottom - 8, 12)
+    : Math.max(plotTop + 8, Math.min(plotBottom - 8, preferredY));
+  const endX = Math.max(
+    64,
+    Math.min(chartWidth - 8, x + direction * (barWidth / 2 + 48 + (seriesIndex % 3) * 18))
+  );
+  appendSvg(svg, "polyline", {
+    points: `${x},${centerY} ${x + direction * (barWidth / 2 + 9)},${endY} ${endX},${endY}`,
+    fill: "none",
+    stroke: "#73827a",
+    "stroke-width": 0.8
+  });
+  appendSvgText(svg, text, endX + direction * 3, endY + 3, {
+    anchor: direction > 0 ? "start" : "end",
+    fill: "#46544d",
+    size: 8
+  });
 }
 
 function createTitleNode(text) {
   const title = document.createElementNS(SVG_NAMESPACE, "title");
   title.textContent = text;
   return title;
+}
+
+function setChartTooltipElement(element, text, hitPoint = null) {
+  element.dataset.chartTooltip = String(text ?? "");
+  if (hitPoint) {
+    element.dataset.chartHitX = String(hitPoint.x);
+    element.dataset.chartHitY = String(hitPoint.y);
+  }
+  element.append(createTitleNode(text));
+  return element;
+}
+
+function attachChartTooltip(container, svg) {
+  if (!svg.querySelector("[data-chart-tooltip]")) {
+    return;
+  }
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.hidden = true;
+  container.append(tooltip);
+  const hide = () => {
+    tooltip.hidden = true;
+  };
+  svg.addEventListener("pointermove", (event) => {
+    const direct = event.target.closest("[data-chart-tooltip]");
+    const target = direct || findNearestChartTooltip(svg, event.clientX, event.clientY);
+    if (!target) {
+      hide();
+      return;
+    }
+    tooltip.textContent = target.dataset.chartTooltip;
+    tooltip.hidden = false;
+    tooltip.style.left = `${Math.min(
+      event.clientX + 12,
+      window.innerWidth - tooltip.offsetWidth - 10
+    )}px`;
+    tooltip.style.top = `${Math.min(
+      event.clientY + 12,
+      window.innerHeight - tooltip.offsetHeight - 10
+    )}px`;
+  });
+  svg.addEventListener("pointerleave", hide);
+}
+
+function findNearestChartTooltip(svg, clientX, clientY) {
+  const candidates = [...svg.querySelectorAll("[data-chart-tooltip]")];
+  let nearest = null;
+  let nearestDistance = 24 * 24;
+  for (const element of candidates) {
+    const point = chartTooltipPoint(element, svg);
+    const distance = (point.x - clientX) ** 2 + (point.y - clientY) ** 2;
+    if (distance < nearestDistance) {
+      nearest = element;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+function chartTooltipPoint(element, svg) {
+  const x = Number(element.dataset.chartHitX);
+  const y = Number(element.dataset.chartHitY);
+  if (Number.isFinite(x) && Number.isFinite(y) && element.getScreenCTM) {
+    const point = svg.createSVGPoint();
+    point.x = x;
+    point.y = y;
+    const screenPoint = point.matrixTransform(element.getScreenCTM());
+    return { x: screenPoint.x, y: screenPoint.y };
+  }
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2
+  };
 }
 
 function buildLegend(labels, colors = []) {
@@ -3010,6 +3695,8 @@ function openWidgetDialog(widget = null) {
   elements.widgetSmallValueMode.value = model.smallValueMode;
   elements.widgetScale.value = model.scale;
   elements.widgetSize.value = model.size;
+  elements.widgetKpiFontColor.value = model.kpiFontColor || "#173d35";
+  elements.widgetKpiBackgroundColor.value = model.kpiBackgroundColor || "#f3f6f4";
   elements.widgetAggregation.value = model.aggregation;
   state.dialogColors = [...model.colors];
   state.editingWidgetFilters = normalizeFilters(model.filters, state.fieldConfigs);
@@ -3073,8 +3760,13 @@ function updateWidgetMetricState() {
 
 function updateWidgetTypeFields() {
   const isPie = elements.widgetType.value === "pie";
+  const isKpi = elements.widgetType.value === "kpi";
+  const supportsSmallValueMode = ["pie", "bar", "stackedBar"].includes(elements.widgetType.value);
   elements.pieLegendThresholdField.hidden = !isPie;
   elements.pieShowLegendTextField.hidden = !isPie;
+  elements.smallValueModeField.hidden = !supportsSmallValueMode;
+  elements.chartColorEditor.hidden = isKpi;
+  elements.kpiColorFields.hidden = !isKpi;
 }
 
 function getWidgetColorLabels(model = null) {
@@ -3159,6 +3851,8 @@ function saveWidgetFromDialog(event) {
     axisLabelMode: elements.widgetAxisLabelMode.value,
     showValues: elements.widgetShowValues.checked,
     colors: state.dialogColors.slice(0, 40),
+    kpiFontColor: elements.widgetKpiFontColor.value,
+    kpiBackgroundColor: elements.widgetKpiBackgroundColor.value,
     filters: cloneJson(state.editingWidgetFilters),
     limit: Math.max(0, Number(elements.widgetLimit.value) || 0),
     pageSize: Math.max(1, Number(elements.widgetPageSize.value) || 20),
@@ -3176,7 +3870,7 @@ function saveWidgetFromDialog(event) {
       state.widgets[index] = normalized;
     }
   } else {
-    state.widgets.push(normalized);
+    state.widgets.unshift(normalized);
   }
   closeWidgetDialog();
   renderDashboard();
@@ -3200,6 +3894,7 @@ function ensureWidgetsUseValidFields() {
 }
 
 function createDefaultTemplateState() {
+  clearCommonFilterEditState();
   state.currentTemplateId = null;
   state.arrayPath = chooseDefaultArrayPath(state.dataset);
   state.fieldConfigs = [];
@@ -3250,7 +3945,15 @@ async function applyTemplate(template) {
 
 function normalizeFilters(filters, fields) {
   const validPaths = new Set(fields.map((field) => field.path));
-  if (filters?.children && Array.isArray(filters.children)) {
+  if (
+    filters
+    && typeof filters === "object"
+    && (
+      filters.type === "group"
+      || Array.isArray(filters.children)
+      || Array.isArray(filters.conditions)
+    )
+  ) {
     return normalizeFilterNode(filters, validPaths, true);
   }
 
@@ -3266,17 +3969,27 @@ function normalizeFilterNode(node, validPaths, forceGroup = false) {
     return {
       id: node.id || createId("filter-reference"),
       type: "reference",
-      name: String(node.name)
+      name: String(node.name),
+      enabled: node.enabled !== false
     };
   }
-  if (node?.type === "group" || forceGroup || Array.isArray(node?.children)) {
+  if (
+    node?.type === "group"
+    || forceGroup
+    || Array.isArray(node?.children)
+    || Array.isArray(node?.conditions)
+  ) {
     const group = createFilterGroup(node?.logic === "any" ? "any" : "all");
     group.id = node?.id || group.id;
-    group.children = Array.isArray(node?.children)
+    group.enabled = node?.enabled !== false;
+    const children = Array.isArray(node?.children)
       ? node.children
-        .map((child) => normalizeFilterNode(child, validPaths, false))
-        .filter(Boolean)
-      : [];
+      : Array.isArray(node?.conditions)
+        ? node.conditions
+        : [];
+    group.children = children
+      .map((child) => normalizeFilterNode(child, validPaths, false))
+      .filter(Boolean);
     return group;
   }
   return normalizeFilterCondition(node, validPaths);
@@ -3291,7 +4004,7 @@ function normalizeFilterCondition(condition, validPaths) {
     type: "condition",
     field: condition.field,
     operator: FILTER_OPERATORS[condition.operator] ? condition.operator : "contains",
-    value: String(condition.value ?? ""),
+    value: String(condition.value ?? condition.conditionValue ?? ""),
     enabled: condition.enabled !== false
   };
 }
@@ -3343,11 +4056,16 @@ function normalizeFieldMappings(fieldMappings) {
 }
 
 function normalizeCommonFilters(commonFilters, fields = state.fieldConfigs) {
-  if (!Array.isArray(commonFilters)) {
+  const items = Array.isArray(commonFilters)
+    ? commonFilters
+    : commonFilters?.name
+      ? [commonFilters]
+      : [];
+  if (!items.length) {
     return [];
   }
   const unique = new Map();
-  for (const item of commonFilters) {
+  for (const item of items) {
     const name = String(item?.name || "").trim();
     if (!name) {
       continue;
@@ -3503,6 +4221,7 @@ async function exportWidgetPng(card, widget) {
 }
 
 async function renderDashboardCanvas(immersive) {
+  cancelWidgetDrag();
   if (immersive) {
     const clone = prepareExportClone(elements.dashboardGrid);
     const fullWidth = getFullElementWidth(elements.dashboardGrid) + 44;
@@ -3538,6 +4257,7 @@ async function renderDashboardCanvas(immersive) {
 }
 
 async function renderElementCanvas(element, options = {}) {
+  cancelWidgetDrag();
   const clone = prepareExportClone(element);
   clone.querySelectorAll(".widget-actions, .table-pagination").forEach((item) => item.remove());
   const width = options.allowScroll
@@ -3592,7 +4312,7 @@ function prepareExportClone(element) {
 
 function sanitizeExportClone(root) {
   root.querySelectorAll(
-    ".widget-actions, .export-controls, .template-controls .button-row, .section-controls, .dashboard-toolbar .button-row, .immersive-exit, dialog, script, input[type='file']"
+    ".widget-actions, .widget-drag-preview, .widget-drop-placeholder, .widget-drag-handle, .chart-tooltip, .table-pagination, .export-controls, .template-controls .button-row, .section-controls, .dashboard-toolbar .button-row, .immersive-exit, dialog, script, input[type='file']"
   ).forEach((element) => element.remove());
 }
 
@@ -3606,8 +4326,11 @@ function getFullElementWidth(element) {
 
 async function exportDashboardHtml() {
   try {
+    cancelWidgetDrag();
     const clone = elements.dashboardGrid.cloneNode(true);
-    clone.querySelectorAll(".widget-actions").forEach((element) => element.remove());
+    clone.querySelectorAll(
+      ".widget-actions, .widget-drag-preview, .widget-drop-placeholder, .widget-drag-handle, .chart-tooltip"
+    ).forEach((element) => element.remove());
     const css = await fetch(chrome.runtime.getURL("report.css")).then((response) => response.text());
     const title = `${state.dataset.name || "数据分析"} · Dashboard`;
     const html = `<!doctype html>
@@ -3636,7 +4359,8 @@ async function exportDashboardHtml() {
   }
 }
 
-async function exportDashboardRules() {
+async function exportDashboardRules(dashboardOnly = false) {
+  cancelWidgetDrag();
   const templates = templatesForCurrentDataset();
   const currentId = state.currentTemplateId || createId("report");
   const current = buildCurrentTemplateModel({
@@ -3645,16 +4369,18 @@ async function exportDashboardRules() {
       || state.reportTemplates.find((template) => template.id === state.currentTemplateId)?.name
       || `${state.dataset.name || "数据集"} 报表`
   });
-  const exportList = [
-    current,
-    ...templates.filter((template) => template.id !== current.id)
-  ];
+  const exportList = dashboardOnly
+    ? [current]
+    : [
+      current,
+      ...templates.filter((template) => template.id !== current.id)
+    ];
   const packageData = {
-    type: "sso-data-bridge-dashboard-package",
+    type: dashboardOnly
+      ? "sso-data-bridge-dashboard-only"
+      : "sso-data-bridge-dashboard-package",
     version: 1,
     exportedAt: Date.now(),
-    requestConfig: cloneJson(state.dataset.requestConfig || null),
-    requestName: state.dataset.name || state.dataset.requestConfig?.name || "导入的请求",
     commonFilters: cloneJson(normalizeCommonFiltersForStorage(
       normalizeCommonFilters(state.commonFilters, state.fieldConfigs),
       exportList
@@ -3662,11 +4388,15 @@ async function exportDashboardRules() {
     fieldMappings: cloneJson(current.fieldMappings),
     templates: cloneJson(exportList)
   };
+  if (!dashboardOnly) {
+    packageData.requestConfig = cloneJson(state.dataset.requestConfig || null);
+    packageData.requestName = state.dataset.name || state.dataset.requestConfig?.name || "导入的请求";
+  }
   downloadBlob(
     new Blob([JSON.stringify(packageData, null, 2)], { type: "application/json" }),
-    `${safeFileName(state.dataset.name)}-dashboard-rules.json`
+    `${safeFileName(state.dataset.name)}-${dashboardOnly ? "current-dashboard" : "dashboard"}-rules.json`
   );
-  showToast("看板规则已导出。");
+  showToast(dashboardOnly ? "当前看板规则已单独导出。" : "完整请求与看板规则已导出。");
 }
 
 async function importDashboardRules() {
@@ -3678,7 +4408,11 @@ async function importDashboardRules() {
 
   try {
     const packageData = JSON.parse(await file.text());
-    const importedTemplates = packageData?.type === "sso-data-bridge-dashboard-package"
+    const dashboardOnly = packageData?.type === "sso-data-bridge-dashboard-only";
+    const importedTemplates = [
+      "sso-data-bridge-dashboard-package",
+      "sso-data-bridge-dashboard-only"
+    ].includes(packageData?.type)
       ? Array.isArray(packageData.templates)
         ? packageData.templates
         : packageData.template
@@ -3692,7 +4426,8 @@ async function importDashboardRules() {
       throw new Error("规则文件中没有报表模板。");
     }
 
-    const sameRequest = theSameRequest(packageData?.requestConfig, state.dataset?.requestConfig);
+    const sameRequest = dashboardOnly
+      || theSameRequest(packageData?.requestConfig, state.dataset?.requestConfig);
     const imported = importedTemplates
       .filter((template) => template && typeof template === "object")
       .map((template) => ({
@@ -3723,7 +4458,9 @@ async function importDashboardRules() {
     broadcast({ type: "REPORT_TEMPLATES_UPDATED", templateId: imported[0].id });
     await applyTemplate(imported[0]);
     renderAll();
-    showToast(`已导入并持久化 ${imported.length} 个报表模板。`);
+    showToast(
+      `已导入并持久化 ${imported.length} 个${dashboardOnly ? "当前看板" : "报表"}模板。`
+    );
   } catch (error) {
     showToast(`规则导入失败：${error.message}`);
   }

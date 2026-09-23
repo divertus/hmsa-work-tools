@@ -82,7 +82,8 @@ function normalizeFilterNode(node) {
     return {
       id: node.id || createId("filter-reference"),
       type: "reference",
-      name: String(node.name)
+      name: String(node.name),
+      enabled: node.enabled !== false
     };
   }
   if (
@@ -111,6 +112,7 @@ function createEmptyFilterGroup(node = null) {
     id: node?.id || createId("filter-group"),
     type: "group",
     logic: node?.logic === "any" ? "any" : "all",
+    enabled: node?.enabled !== false,
     children: []
   };
 }

@@ -38,6 +38,7 @@
         <button id="export-png-button" class="button" type="button">看板 PNG</button>
         <button id="export-html-button" class="button" type="button">本地 HTML</button>
         <button id="export-rules-button" class="button" type="button">导出规则</button>
+        <button id="export-dashboard-rules-button" class="button" type="button">导出当前看板</button>
         <button id="import-rules-button" class="button" type="button">导入规则</button>
         <button id="export-immersive-png-button" class="button" type="button">沉浸 PNG</button>
       </div>
@@ -52,7 +53,6 @@
               <h2>响应数组</h2>
             </div>
             <div class="section-controls">
-              <button id="reload-data-button" class="text-button" type="button">重新读取</button>
               <button class="section-toggle" data-toggle-section="source" type="button" aria-expanded="true">−</button>
             </div>
           </div>
@@ -79,6 +79,8 @@
             <input id="field-search" type="search" placeholder="字段名">
           </label>
           <div class="button-row fields-actions">
+            <button id="select-all-fields-button" class="button" type="button">全选</button>
+            <button id="invert-fields-button" class="button" type="button">反选</button>
             <button id="hide-unselected-fields-button" class="button" type="button">隐藏未选中</button>
             <button id="move-unselected-fields-top-button" class="button" type="button">未选中置顶</button>
           </div>
@@ -134,6 +136,7 @@
           <div class="common-filter-create">
             <input id="common-filter-name" type="text" placeholder="唯一名称">
             <button id="save-common-filter-button" class="button" type="button">保存当前条件</button>
+            <button id="cancel-common-filter-edit-button" class="text-button" type="button" hidden>取消编辑</button>
           </div>
           <div id="common-filter-list" class="common-filter-list"></div>
           <label class="field">
@@ -284,7 +287,7 @@
         </div>
 
         <div class="two-column">
-          <label class="field">
+          <label id="small-value-mode-field" class="field">
             <span>小面积数值显示</span>
             <select id="widget-small-value-mode">
               <option value="leader">导引线展示</option>
@@ -314,12 +317,23 @@
           <div id="widget-filter-list" class="filter-list"></div>
         </div>
 
-        <div class="color-editor">
+        <div id="chart-color-editor" class="color-editor">
           <div class="field-label-row">
             <span>图表颜色</span>
             <button id="reset-widget-colors-button" class="text-button" type="button">恢复自动配色</button>
           </div>
           <div id="widget-color-list" class="color-list"></div>
+        </div>
+
+        <div id="kpi-color-fields" class="two-column">
+          <label class="field">
+            <span>指标卡字体颜色</span>
+            <input id="widget-kpi-font-color" type="color" value="#173d35">
+          </label>
+          <label class="field">
+            <span>指标卡背景颜色</span>
+            <input id="widget-kpi-background-color" type="color" value="#f3f6f4">
+          </label>
         </div>
 
         <div class="dialog-actions">

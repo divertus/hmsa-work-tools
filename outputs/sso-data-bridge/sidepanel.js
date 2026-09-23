@@ -385,7 +385,10 @@ async function importProfiles() {
 
   try {
     const raw = JSON.parse(await file.text());
-    if (raw?.type === "sso-data-bridge-dashboard-package") {
+    if ([
+      "sso-data-bridge-dashboard-package",
+      "sso-data-bridge-dashboard-only"
+    ].includes(raw?.type)) {
       await importDashboardPackage(raw);
       return;
     }
@@ -429,19 +432,31 @@ async function importProfiles() {
 }
 
 async function importDashboardPackage(packageData) {
-  if (!packageData.requestConfig) {
-    throw new Error("看板规则中没有请求配置。");
+  const dashboardOnly = packageData.type === "sso-data-bridge-dashboard-only";
+  let requestConfig;
+  let profileId;
+
+  if (dashboardOnly) {
+    const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+    if (!activeProfile) {
+      throw new Error("仅看板规则不包含请求配置，请先选择或保存一个接口配置。");
+    }
+    requestConfig = clone(activeProfile);
+    profileId = activeProfile.id;
+  } else {
+    if (!packageData.requestConfig) {
+      throw new Error("看板规则中没有请求配置。");
+    }
+    const importedConfig = normalizeConfig(packageData.requestConfig);
+    const existingProfile = profiles.find((profile) => profile.id === importedConfig.id);
+    profileId = existingProfile ? createId("profile") : importedConfig.id;
+    requestConfig = {
+      ...importedConfig,
+      id: profileId
+    };
+    profiles.push(requestConfig);
   }
 
-  const importedConfig = normalizeConfig(packageData.requestConfig);
-  const existingProfile = profiles.find((profile) => profile.id === importedConfig.id);
-  const profileId = existingProfile ? createId("profile") : importedConfig.id;
-  const requestConfig = {
-    ...importedConfig,
-    id: profileId
-  };
-
-  profiles.push(requestConfig);
   activeProfileId = profileId;
   currentConfig = clone(requestConfig);
   applyConfig(currentConfig);
@@ -495,9 +510,9 @@ async function importDashboardPackage(packageData) {
     type: "REPORT_TEMPLATES_UPDATED",
     templateId: normalizedTemplates[0]?.id || null
   }).catch(() => {});
-  showToast(
-    `已导入请求、${normalizedTemplates.length} 个报表模板和 ${mergedCommonFilters.length} 个常用条件。`
-  );
+  showToast(dashboardOnly
+    ? `已导入 ${normalizedTemplates.length} 个当前看板模板和 ${mergedCommonFilters.length} 个常用条件。`
+    : `已导入请求、${normalizedTemplates.length} 个报表模板和 ${mergedCommonFilters.length} 个常用条件。`);
 }
 
 async function runJob() {
