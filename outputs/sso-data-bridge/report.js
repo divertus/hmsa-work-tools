@@ -47,6 +47,23 @@ const elements = {
   importFieldMappingButton: document.querySelector("#import-field-mapping-button"),
   fieldMappingFileInput: document.querySelector("#field-mapping-file-input"),
   fieldMappingState: document.querySelector("#field-mapping-state"),
+  fieldMappingModeSwitch: document.querySelector("#field-mapping-mode-switch"),
+  fieldMappingJsonPanel: document.querySelector("#field-mapping-json-panel"),
+  fieldMappingFormPanel: document.querySelector("#field-mapping-form-panel"),
+  fieldMappingRuleList: document.querySelector("#field-mapping-rule-list"),
+  addFieldMappingRuleButton: document.querySelector("#add-field-mapping-rule-button"),
+  fieldMappingDialog: document.querySelector("#field-mapping-dialog"),
+  fieldMappingForm: document.querySelector("#field-mapping-form"),
+  fieldMappingDialogTitle: document.querySelector("#field-mapping-dialog-title"),
+  fieldMappingDialogClose: document.querySelector("#field-mapping-dialog-close"),
+  fieldMappingCancelButton: document.querySelector("#field-mapping-cancel-button"),
+  fieldMappingSourceField: document.querySelector("#field-mapping-source-field"),
+  fieldMappingTargetField: document.querySelector("#field-mapping-target-field"),
+  fieldMappingOperator: document.querySelector("#field-mapping-operator"),
+  fieldMappingConditionField: document.querySelector("#field-mapping-condition-field"),
+  fieldMappingConditionValue: document.querySelector("#field-mapping-condition-value"),
+  fieldMappingTargetValue: document.querySelector("#field-mapping-target-value"),
+  fieldMappingOverwrite: document.querySelector("#field-mapping-overwrite"),
   mappingList: document.querySelector("#mapping-list"),
   filterLogic: document.querySelector("#filter-logic"),
   addFilterButton: document.querySelector("#add-filter-button"),
@@ -126,6 +143,8 @@ const state = {
   fieldConfigs: [],
   valueMappings: {},
   fieldMappings: [],
+  fieldMappingMode: "json",
+  editingFieldMappingId: null,
   mappingField: "",
   filteredRows: [],
   filters: createFilterGroup("all"),
@@ -260,6 +279,13 @@ function bindEvents() {
   elements.downloadFieldMappingTemplateButton.addEventListener("click", downloadFieldMappingTemplate);
   elements.importFieldMappingButton.addEventListener("click", () => elements.fieldMappingFileInput.click());
   elements.fieldMappingFileInput.addEventListener("change", importFieldMappingFile);
+  elements.fieldMappingModeSwitch.addEventListener("click", handleFieldMappingModeSwitch);
+  elements.addFieldMappingRuleButton.addEventListener("click", () => openFieldMappingDialog());
+  elements.fieldMappingRuleList.addEventListener("click", handleFieldMappingRuleAction);
+  elements.fieldMappingDialogClose.addEventListener("click", closeFieldMappingDialog);
+  elements.fieldMappingCancelButton.addEventListener("click", closeFieldMappingDialog);
+  elements.fieldMappingOperator.addEventListener("change", updateFieldMappingConditionField);
+  elements.fieldMappingForm.addEventListener("submit", saveFieldMappingRule);
   elements.mappingList.addEventListener("change", handleMappingChange);
   elements.mappingList.addEventListener("input", handleMappingChange);
   elements.mappingList.addEventListener("click", handleMappingClick);
@@ -1571,6 +1597,8 @@ function renderFieldMappingEditor(fields) {
     version: 1,
     rules: state.fieldMappings
   }, null, 2);
+  renderFieldMappingRuleList(fields);
+  updateFieldMappingMode();
   elements.fieldMappingState.textContent = state.fieldMappings.length
     ? `已应用 ${state.fieldMappings.length} 条字段派生规则。`
     : "尚未应用字段派生规则。";
@@ -1578,18 +1606,211 @@ function renderFieldMappingEditor(fields) {
 
 function applyFieldMappingJson() {
   try {
-    const parsed = JSON.parse(elements.fieldMappingJson.value || "{}");
-    const rules = Array.isArray(parsed) ? parsed : parsed.rules;
-    if (!Array.isArray(rules)) {
-      throw new Error("JSON 中必须包含 rules 数组。");
-    }
-    state.fieldMappings = normalizeFieldMappings(rules);
+    state.fieldMappings = parseFieldMappingJson();
     refreshDerivedFields();
     elements.fieldMappingState.textContent = `已应用 ${state.fieldMappings.length} 条字段派生规则。`;
     showToast(`已应用 ${state.fieldMappings.length} 条字段派生规则。`);
   } catch (error) {
     showToast(`字段派生规则错误：${error.message}`);
   }
+}
+
+function parseFieldMappingJson() {
+  const parsed = JSON.parse(elements.fieldMappingJson.value || "{}");
+  const rules = Array.isArray(parsed) ? parsed : parsed.rules;
+  if (!Array.isArray(rules)) {
+    throw new Error("JSON 中必须包含 rules 数组。");
+  }
+  return normalizeFieldMappings(rules);
+}
+
+function handleFieldMappingModeSwitch(event) {
+  const button = event.target.closest("[data-field-mapping-mode]");
+  if (!button) {
+    return;
+  }
+  const mode = button.dataset.fieldMappingMode;
+  if (mode === state.fieldMappingMode) {
+    return;
+  }
+  if (mode === "form") {
+    try {
+      state.fieldMappings = parseFieldMappingJson();
+      state.fieldMappingMode = "form";
+      refreshDerivedFields();
+    } catch (error) {
+      showToast(`字段派生规则错误：${error.message}`);
+      return;
+    }
+    return;
+  }
+  state.fieldMappingMode = "json";
+  renderMappingEditor();
+}
+
+function updateFieldMappingMode() {
+  const formMode = state.fieldMappingMode === "form";
+  elements.fieldMappingJsonPanel.hidden = formMode;
+  elements.fieldMappingFormPanel.hidden = !formMode;
+  for (const button of elements.fieldMappingModeSwitch.querySelectorAll("[data-field-mapping-mode]")) {
+    button.classList.toggle(
+      "is-active",
+      button.dataset.fieldMappingMode === state.fieldMappingMode
+    );
+  }
+}
+
+function renderFieldMappingRuleList(fields) {
+  elements.fieldMappingRuleList.replaceChildren();
+  if (!state.fieldMappings.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "尚未添加字段派生规则。";
+    elements.fieldMappingRuleList.append(empty);
+    return;
+  }
+
+  for (const mapping of state.fieldMappings) {
+    const item = document.createElement("div");
+    item.className = "field-mapping-list-item";
+    item.dataset.id = mapping.id;
+    const summary = document.createElement("div");
+    summary.className = "field-mapping-list-summary";
+    const title = document.createElement("strong");
+    title.textContent = `${fieldLabel(mapping.sourceField)} → ${fieldLabel(mapping.targetField)}`;
+    const detail = document.createElement("span");
+    detail.textContent = describeFieldMappingRule(mapping);
+    summary.append(title, detail);
+
+    const actions = document.createElement("div");
+    actions.className = "field-mapping-list-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "mini-button";
+    edit.dataset.action = "editFieldMapping";
+    edit.textContent = "编辑";
+    edit.title = "编辑派生规则";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "mini-button";
+    remove.dataset.action = "deleteFieldMapping";
+    remove.textContent = "×";
+    remove.title = "删除派生规则";
+    actions.append(edit, remove);
+    item.append(summary, actions);
+    elements.fieldMappingRuleList.append(item);
+  }
+}
+
+function describeFieldMappingRule(mapping) {
+  const operator = FILTER_OPERATORS[mapping.operator] || "直接复制";
+  const condition = mapping.operator === "copy"
+    ? "直接复制源字段"
+    : ["empty", "notEmpty"].includes(mapping.operator)
+      ? operator
+      : `${operator} ${mapping.conditionValue}`;
+  const target = mapping.operator === "copy"
+    ? fieldLabel(mapping.targetField)
+    : `${fieldLabel(mapping.targetField)} = ${mapping.targetValue}`;
+  return `${condition}，${target}${mapping.overwrite ? "，允许覆盖" : ""}`;
+}
+
+function handleFieldMappingRuleAction(event) {
+  const button = event.target.closest("button[data-action]");
+  const item = event.target.closest(".field-mapping-list-item");
+  if (!button || !item) {
+    return;
+  }
+  if (button.dataset.action === "editFieldMapping") {
+    openFieldMappingDialog(item.dataset.id);
+  }
+  if (button.dataset.action === "deleteFieldMapping") {
+    state.fieldMappings = state.fieldMappings.filter((mapping) => mapping.id !== item.dataset.id);
+    refreshDerivedFields();
+    showToast("字段派生规则已删除。");
+  }
+}
+
+function openFieldMappingDialog(mappingId = null) {
+  const fields = [...state.fieldConfigs].sort((a, b) => a.order - b.order);
+  if (!fields.length) {
+    showToast("当前没有可用于字段派生的字段。");
+    return;
+  }
+  const model = state.fieldMappings.find((mapping) => mapping.id === mappingId) || {
+    id: null,
+    sourceField: fields[0].path,
+    operator: "equals",
+    conditionValue: "",
+    targetField: fields.length > 1 ? fields[1].path : fields[0].path,
+    targetValue: "",
+    overwrite: true
+  };
+  state.editingFieldMappingId = mappingId;
+  elements.fieldMappingDialogTitle.textContent = mappingId ? "编辑字段派生规则" : "新增字段派生规则";
+  fillFieldMappingFieldSelect(elements.fieldMappingSourceField, fields, model.sourceField);
+  fillFieldMappingFieldSelect(elements.fieldMappingTargetField, fields, model.targetField);
+  elements.fieldMappingOperator.value = model.operator || "equals";
+  elements.fieldMappingConditionValue.value = model.conditionValue || "";
+  elements.fieldMappingTargetValue.value = model.targetValue || "";
+  elements.fieldMappingOverwrite.checked = model.overwrite !== false;
+  updateFieldMappingConditionField();
+  elements.fieldMappingDialog.showModal();
+}
+
+function fillFieldMappingFieldSelect(select, fields, selected) {
+  select.replaceChildren();
+  for (const field of fields) {
+    const option = document.createElement("option");
+    option.value = field.path;
+    option.textContent = field.label;
+    select.append(option);
+  }
+  select.value = selected || fields[0].path;
+}
+
+function updateFieldMappingConditionField() {
+  const operator = elements.fieldMappingOperator.value;
+  const noCondition = ["copy", "empty", "notEmpty"].includes(operator);
+  elements.fieldMappingConditionField.hidden = noCondition;
+  elements.fieldMappingConditionValue.disabled = noCondition;
+  elements.fieldMappingTargetValue.disabled = operator === "copy";
+}
+
+function saveFieldMappingRule(event) {
+  event.preventDefault();
+  const operator = elements.fieldMappingOperator.value;
+  const mapping = normalizeFieldMappings([{
+    id: state.editingFieldMappingId || createId("field-mapping"),
+    sourceField: elements.fieldMappingSourceField.value,
+    operator,
+    conditionValue: operator === "copy"
+      ? ""
+      : elements.fieldMappingConditionValue.value,
+    targetField: elements.fieldMappingTargetField.value,
+    targetValue: operator === "copy"
+      ? ""
+      : elements.fieldMappingTargetValue.value,
+    overwrite: elements.fieldMappingOverwrite.checked
+  }])[0];
+  if (!mapping) {
+    showToast("请选择源字段和目标字段。");
+    return;
+  }
+  const index = state.fieldMappings.findIndex((item) => item.id === mapping.id);
+  if (index >= 0) {
+    state.fieldMappings[index] = mapping;
+  } else {
+    state.fieldMappings.push(mapping);
+  }
+  closeFieldMappingDialog();
+  refreshDerivedFields();
+  showToast(index >= 0 ? "字段派生规则已更新。" : "字段派生规则已新增。");
+}
+
+function closeFieldMappingDialog() {
+  state.editingFieldMappingId = null;
+  elements.fieldMappingDialog.close();
 }
 
 function downloadFieldMappingTemplate() {
@@ -2329,7 +2550,8 @@ function renderDashboard() {
     card.className = [
       "widget-card",
       widget.size === "full" ? "widget-full" : "",
-      widget.type === "kpi" ? "widget-kpi-card" : ""
+      widget.type === "kpi" ? "widget-kpi-card" : "",
+      widget.type === "table" ? "widget-table-card" : ""
     ].filter(Boolean).join(" ");
     card.dataset.id = widget.id;
     if (widget.type === "kpi") {
@@ -2910,9 +3132,83 @@ function renderChartThemeControls() {
     elements.chartThemeSelect.append(option);
   }
   elements.chartThemeSelect.value = state.chartThemeId;
-  renderChartThemePreview(getCurrentChartTheme());
+  const activeTheme = getCurrentChartTheme();
+  applyInterfaceTheme(activeTheme);
+  renderChartThemePreview(activeTheme);
   elements.deleteChartThemeButton.disabled = !state.customChartThemes
     .some((theme) => theme.id === state.chartThemeId);
+}
+
+function applyInterfaceTheme(theme) {
+  const root = document.documentElement;
+  const variables = getInterfaceThemeVariables(theme);
+  for (const [name, value] of Object.entries(variables)) {
+    root.style.setProperty(name, value);
+  }
+  root.style.colorScheme = relativeLuminance(theme.backgroundColor) < 0.42
+    ? "dark"
+    : "light";
+  document.body.dataset.interfaceTheme = theme.id;
+}
+
+function getInterfaceThemeVariables(theme) {
+  const dark = relativeLuminance(theme.backgroundColor) < 0.42;
+  const accent = pickInterfaceAccent(theme);
+  const surfaceSoft = mixHexColors(
+    theme.backgroundColor,
+    theme.textColor,
+    dark ? 0.1 : 0.055
+  );
+  return {
+    "--page": theme.backgroundColor,
+    "--surface": theme.backgroundColor,
+    "--surface-soft": surfaceSoft,
+    "--text": theme.textColor,
+    "--muted": theme.mutedTextColor,
+    "--border": mixHexColors(theme.backgroundColor, theme.axisColor, 0.38),
+    "--border-strong": theme.axisColor,
+    "--accent": accent,
+    "--accent-dark": mixHexColors(accent, theme.textColor, 0.35),
+    "--accent-soft": mixHexColors(theme.backgroundColor, accent, 0.22),
+    "--accent-contrast": getContrastTextColor(accent),
+    "--shadow": dark
+      ? "0 10px 28px rgb(0 0 0 / 28%)"
+      : "0 8px 24px rgb(23 33 29 / 9%)"
+  };
+}
+
+function pickInterfaceAccent(theme) {
+  const candidates = [
+    theme.colors[0],
+    theme.axisColor,
+    theme.textColor
+  ];
+  return candidates.find((color) => contrastRatio(color, theme.backgroundColor) >= 3.5)
+    || theme.textColor;
+}
+
+function getContrastTextColor(background) {
+  return relativeLuminance(background) > 0.62 ? "#17211d" : "#ffffff";
+}
+
+function contrastRatio(first, second) {
+  const left = relativeLuminance(first);
+  const right = relativeLuminance(second);
+  return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
+}
+
+function relativeLuminance(color) {
+  const parsed = parseHexColor(color);
+  if (!parsed) {
+    return 0;
+  }
+  const channels = [parsed.r, parsed.g, parsed.b].map((value) => {
+    const channel = value / 255;
+    return channel <= 0.03928
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
 }
 
 function renderChartThemePreview(theme) {
@@ -4669,7 +4965,7 @@ async function exportWidgetPng(card, widget) {
     const canvas = await renderEChartsWidgetCanvas(card, widget)
       || await renderElementCanvas(card, {
         allowScroll: true,
-        background: "#ffffff"
+        background: getCurrentChartTheme().backgroundColor
       });
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     downloadBlob(blob, `${safeFileName(widget.title)}.png`);
@@ -4734,6 +5030,13 @@ function nextAnimationFrame() {
   return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
+function interfaceThemeStyleText() {
+  const variables = getInterfaceThemeVariables(getCurrentChartTheme());
+  return `:root { ${Object.entries(variables)
+    .map(([name, value]) => `${name}: ${value};`)
+    .join(" ")} }`;
+}
+
 async function renderDashboardCanvas(immersive) {
   cancelWidgetDrag();
   if (immersive) {
@@ -4743,12 +5046,12 @@ async function renderDashboardCanvas(immersive) {
     const height = Math.max(420, elements.dashboardGrid.scrollHeight + 80);
     const title = `${state.dataset.name || "数据分析"} · Dashboard`;
     const html = `
-      <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width - 44}px;padding:22px;background:#f3f6f4;box-sizing:border-box">
+      <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width - 44}px;padding:22px;background:var(--page);box-sizing:border-box">
         <div class="export-heading">${escapeHtml(title)}</div>
         ${clone.outerHTML}
       </div>
     `;
-    return renderHtmlToCanvas(html, width, height, "#f3f6f4");
+    return renderHtmlToCanvas(html, width, height, getCurrentChartTheme().backgroundColor);
   }
 
   const clone = prepareExportClone(elements.dashboardGrid);
@@ -4761,13 +5064,13 @@ async function renderDashboardCanvas(immersive) {
     `组件数：${state.widgets.length}`
   ].join("　");
   const html = `
-    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width - 48}px;padding:24px;background:#f3f6f4;box-sizing:border-box">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width - 48}px;padding:24px;background:var(--page);box-sizing:border-box">
       <div class="export-heading">${escapeHtml(title)}</div>
       <div style="margin:-5px 0 16px;color:#637068;font:12px Inter,PingFang SC,sans-serif">${escapeHtml(summary)}</div>
       ${clone.outerHTML}
     </div>
   `;
-  return renderHtmlToCanvas(html, width, height, "#f3f6f4");
+  return renderHtmlToCanvas(html, width, height, getCurrentChartTheme().backgroundColor);
 }
 
 async function renderElementCanvas(element, options = {}) {
@@ -4790,8 +5093,9 @@ async function renderHtmlToCanvas(html, width, height, background) {
   const css = await fetch(chrome.runtime.getURL("report.css")).then((response) => response.text());
   const documentHtml = `
     <style>
+      ${interfaceThemeStyleText()}
       ${css}
-      html, body { min-width: 0; width: ${width}px; background: #f3f6f4; }
+      html, body { min-width: 0; width: ${width}px; background: var(--page); }
       body { padding: 18px; }
       .export-heading { margin: 0 0 14px; font: 700 22px Inter, PingFang SC, sans-serif; color: #17211d; }
       .widget-card { break-inside: avoid; }
@@ -4856,7 +5160,7 @@ async function exportDashboardHtml() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  <style>${css}</style>
+  <style>${interfaceThemeStyleText()}${css}</style>
 </head>
 <body class="export-page">
   <main class="report-main">

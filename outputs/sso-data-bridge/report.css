@@ -153,7 +153,7 @@ h2 {
 
 .compact-field > span,
 .field > span {
-  color: #47554e;
+  color: var(--text);
   font-size: 11px;
   font-weight: 750;
 }
@@ -197,7 +197,7 @@ button:focus-visible {
 .button {
   min-height: 34px;
   padding: 6px 10px;
-  color: #2f3d36;
+  color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border-strong);
   font-size: 12px;
@@ -209,7 +209,7 @@ button:focus-visible {
 }
 
 .button-primary {
-  color: #fff;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -269,6 +269,10 @@ button:focus-visible {
 
 .report-immersive .report-main {
   padding: 22px;
+}
+
+.report-immersive .widget-card:not(.widget-table-card) .widget-actions {
+  display: none;
 }
 
 .immersive-exit {
@@ -438,6 +442,89 @@ button:focus-visible {
   border-radius: 5px;
 }
 
+.mode-switch {
+  display: inline-flex;
+  gap: 3px;
+  margin-bottom: 7px;
+  padding: 3px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.mode-button {
+  min-height: 28px;
+  padding: 4px 9px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mode-button.is-active {
+  color: var(--accent-contrast, #ffffff);
+  background: var(--accent);
+}
+
+.mapping-form-heading {
+  margin-bottom: 6px;
+}
+
+.field-mapping-list {
+  display: grid;
+  gap: 6px;
+}
+
+.field-mapping-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 7px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.field-mapping-list-summary {
+  min-width: 0;
+}
+
+.field-mapping-list-summary strong,
+.field-mapping-list-summary span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-mapping-list-summary strong {
+  font-size: 11px;
+}
+
+.field-mapping-list-summary span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.field-mapping-list-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.field-mapping-list-actions .mini-button[data-action="editFieldMapping"] {
+  width: auto;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.field-mapping-dialog {
+  width: min(680px, calc(100vw - 40px));
+}
+
 .field-mapping-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 82px minmax(0, 1fr);
@@ -500,7 +587,7 @@ button:focus-visible {
   gap: 7px;
   min-height: 34px;
   padding-top: 17px;
-  color: #47554e;
+  color: var(--text);
   font-size: 11px;
   font-weight: 750;
 }
@@ -529,7 +616,7 @@ button:focus-visible {
 }
 
 .field-item.is-selected {
-  border-color: #b7d8d0;
+  border-color: var(--accent);
 }
 
 .field-item input[type="checkbox"] {
@@ -595,8 +682,8 @@ button:focus-visible {
   display: grid;
   gap: 6px;
   padding: 7px;
-  background: #f5f8f6;
-  border-left: 3px solid #7a9f95;
+  background: var(--surface-soft);
+  border-left: 3px solid var(--accent);
   border-radius: 5px;
 }
 
@@ -664,7 +751,7 @@ button:focus-visible {
 
 .analysis-chip {
   padding: 4px 7px;
-  color: #405048;
+  color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -693,6 +780,16 @@ button:focus-visible {
 .widget-card.widget-kpi-card {
   color: var(--kpi-font-color, var(--text));
   background: var(--kpi-background-color, var(--surface));
+}
+
+.widget-card.widget-table-card {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.widget-table-card .widget-header,
+.widget-table-card .widget-body {
+  background: var(--surface);
 }
 
 .widget-card.widget-kpi-card .widget-header,
@@ -880,7 +977,7 @@ body.widget-dragging {
   position: sticky;
   z-index: 1;
   top: 0;
-  color: #405048;
+  color: var(--text);
   background: var(--surface-soft);
   font-weight: 800;
 }

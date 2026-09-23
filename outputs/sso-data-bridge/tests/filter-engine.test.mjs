@@ -258,6 +258,32 @@ test("匹配逻辑对旧别名条件回退到原始字段", () => {
   ), true);
 });
 
+test("全局界面主题变量保持背景和文字清晰", () => {
+  const dark = reportHelpers.getInterfaceThemeVariables({
+    colors: ["#0066ff"],
+    textColor: "#f8fafc",
+    mutedTextColor: "#9fb0c0",
+    backgroundColor: "#101820",
+    gridColor: "#2a3744",
+    axisColor: "#57728a"
+  });
+  const light = reportHelpers.getInterfaceThemeVariables({
+    colors: ["#36454f"],
+    textColor: "#26343b",
+    mutedTextColor: "#66727a",
+    backgroundColor: "#ffffff",
+    gridColor: "#e5e8ea",
+    axisColor: "#7b858c"
+  });
+
+  assert.equal(dark["--surface"], "#101820");
+  assert.equal(dark["--text"], "#f8fafc");
+  assert.equal(light["--surface"], "#ffffff");
+  assert.equal(light["--text"], "#26343b");
+  assert.ok(reportHelpers.contrastRatio(dark["--text"], dark["--surface"]) >= 4.5);
+  assert.ok(reportHelpers.contrastRatio(light["--text"], light["--surface"]) >= 4.5);
+});
+
 function createFilterEngine() {
   const names = [
     "isFilterConditionReady",
@@ -304,6 +330,13 @@ function createReportHelpers(state = { reportTemplates: [] }) {
     extractFunction("resolveFieldPath"),
     extractFunction("resolveFieldReference"),
     extractFunction("matchesFilter"),
+    extractFunction("getInterfaceThemeVariables"),
+    extractFunction("pickInterfaceAccent"),
+    extractFunction("getContrastTextColor"),
+    extractFunction("contrastRatio"),
+    extractFunction("relativeLuminance"),
+    extractFunction("mixHexColors"),
+    extractFunction("parseHexColor"),
     extractFunction("escapeXml")
   ].join("\n");
   return new Function(
@@ -320,6 +353,8 @@ function createReportHelpers(state = { reportTemplates: [] }) {
       syncCommonFilterToTemplates,
       nextCopiedWidgetTitle,
       matchesFilter,
+      getInterfaceThemeVariables,
+      contrastRatio,
       escapeXml
     };`
   )(

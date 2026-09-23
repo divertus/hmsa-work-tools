@@ -100,12 +100,25 @@
           <div class="subsection-heading">
             <h3>字段派生映射</h3>
           </div>
-          <textarea id="field-mapping-json" rows="11" spellcheck="false" placeholder="在这里导入派生规则 JSON"></textarea>
-          <div class="button-row mapping-json-actions">
-            <button id="apply-field-mapping-button" class="button" type="button">应用 JSON</button>
-            <button id="download-field-mapping-template-button" class="text-button" type="button">下载模板</button>
-            <button id="import-field-mapping-button" class="text-button" type="button">导入 JSON</button>
-            <input id="field-mapping-file-input" type="file" accept="application/json,.json" hidden>
+          <div id="field-mapping-mode-switch" class="mode-switch" role="group" aria-label="字段派生编辑模式">
+            <button class="mode-button is-active" data-field-mapping-mode="json" type="button">JSON 模式</button>
+            <button class="mode-button" data-field-mapping-mode="form" type="button">表单模式</button>
+          </div>
+          <div id="field-mapping-json-panel">
+            <textarea id="field-mapping-json" rows="11" spellcheck="false" placeholder="在这里导入派生规则 JSON"></textarea>
+            <div class="button-row mapping-json-actions">
+              <button id="apply-field-mapping-button" class="button" type="button">应用 JSON</button>
+              <button id="download-field-mapping-template-button" class="text-button" type="button">下载模板</button>
+              <button id="import-field-mapping-button" class="text-button" type="button">导入 JSON</button>
+              <input id="field-mapping-file-input" type="file" accept="application/json,.json" hidden>
+            </div>
+          </div>
+          <div id="field-mapping-form-panel" hidden>
+            <div class="field-label-row mapping-form-heading">
+              <span>派生规则列表</span>
+              <button id="add-field-mapping-rule-button" class="text-button" type="button">新增单条规则</button>
+            </div>
+            <div id="field-mapping-rule-list" class="field-mapping-list"></div>
           </div>
           <p id="field-mapping-state" class="muted">尚未应用字段派生规则。</p>
           <div class="subsection-heading">
@@ -385,6 +398,62 @@
         <div class="dialog-actions">
           <button id="chart-theme-cancel-button" class="button" type="button">取消</button>
           <button class="button button-primary" type="submit">保存并应用</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="field-mapping-dialog" class="widget-dialog field-mapping-dialog">
+      <form id="field-mapping-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">Derived Field</p>
+            <h2 id="field-mapping-dialog-title">新增字段派生规则</h2>
+          </div>
+          <button id="field-mapping-dialog-close" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="two-column">
+          <label class="field">
+            <span>源字段</span>
+            <select id="field-mapping-source-field"></select>
+          </label>
+          <label class="field">
+            <span>目标字段</span>
+            <select id="field-mapping-target-field"></select>
+          </label>
+        </div>
+        <div class="two-column">
+          <label class="field">
+            <span>匹配方式</span>
+            <select id="field-mapping-operator">
+              <option value="equals">等于</option>
+              <option value="notEquals">不等于</option>
+              <option value="contains">包含</option>
+              <option value="notContains">不包含</option>
+              <option value="gt">大于</option>
+              <option value="gte">大于等于</option>
+              <option value="lt">小于</option>
+              <option value="lte">小于等于</option>
+              <option value="empty">为空</option>
+              <option value="notEmpty">不为空</option>
+              <option value="copy">直接复制</option>
+            </select>
+          </label>
+          <label id="field-mapping-condition-field" class="field">
+            <span>条件值</span>
+            <input id="field-mapping-condition-value" type="text" placeholder="匹配值">
+          </label>
+        </div>
+        <label class="field">
+          <span>派生值</span>
+          <input id="field-mapping-target-value" type="text" placeholder="条件满足时写入目标字段">
+        </label>
+        <label class="check-field">
+          <input id="field-mapping-overwrite" type="checkbox">
+          <span>覆盖目标字段已有值</span>
+        </label>
+        <div class="dialog-actions">
+          <button id="field-mapping-cancel-button" class="button" type="button">取消</button>
+          <button class="button button-primary" type="submit">应用规则</button>
         </div>
       </form>
     </dialog>
