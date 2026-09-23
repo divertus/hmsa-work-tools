@@ -160,6 +160,13 @@
             <div id="analysis-summary" class="analysis-summary"></div>
           </div>
           <div class="button-row">
+            <label class="compact-field theme-select-field">
+              <span>配色方案</span>
+              <select id="chart-theme-select"></select>
+            </label>
+            <div id="chart-theme-preview" class="theme-preview" aria-label="当前配色预览"></div>
+            <button id="create-chart-theme-button" class="button" type="button">新建配色</button>
+            <button id="delete-chart-theme-button" class="button" type="button">删除配色</button>
             <button id="toggle-sidebar-button" class="button" type="button">隐藏左侧</button>
             <button id="immersive-button" class="button" type="button">沉浸态</button>
             <button id="add-widget-button" class="button button-primary" type="button">添加组件</button>
@@ -343,9 +350,49 @@
       </form>
     </dialog>
 
+    <dialog id="chart-theme-dialog" class="widget-dialog theme-dialog">
+      <form id="chart-theme-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">Palette</p>
+            <h2>保存配色方案</h2>
+          </div>
+          <button id="chart-theme-dialog-close" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <label class="field">
+          <span>方案名称</span>
+          <input id="chart-theme-name" type="text" required>
+        </label>
+        <div class="field-label-row">
+          <span>分类配色</span>
+          <span class="muted">用于系列、扇区和分类</span>
+        </div>
+        <div id="theme-color-list" class="color-list"></div>
+        <div class="three-column theme-surface-fields">
+          <label class="field">
+            <span>文字颜色</span>
+            <input id="theme-text-color" type="color" value="#26343b">
+          </label>
+          <label class="field">
+            <span>背景颜色</span>
+            <input id="theme-background-color" type="color" value="#ffffff">
+          </label>
+          <label class="field">
+            <span>坐标轴颜色</span>
+            <input id="theme-axis-color" type="color" value="#7b858c">
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="chart-theme-cancel-button" class="button" type="button">取消</button>
+          <button class="button button-primary" type="submit">保存并应用</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <button id="immersive-exit-button" class="immersive-exit" type="button" hidden>退出沉浸态</button>
     <input id="report-rules-input" type="file" accept="application/json,.json" hidden>
+    <script src="vendor/echarts.min.js"></script>
     <script type="module" src="report.js"></script>
   </body>
 </html>

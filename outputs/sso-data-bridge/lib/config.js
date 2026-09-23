@@ -7,7 +7,8 @@ export const STORAGE_KEYS = {
   lastAppliedCaptureId: "ssoDataBridge.lastAppliedCaptureId",
   reportTemplates: "ssoDataBridge.reportTemplates",
   reportUiState: "ssoDataBridge.reportUiState",
-  commonFilters: "ssoDataBridge.commonFilters"
+  commonFilters: "ssoDataBridge.commonFilters",
+  chartThemes: "ssoDataBridge.chartThemes"
 };
 
 export function createId(prefix = "id") {

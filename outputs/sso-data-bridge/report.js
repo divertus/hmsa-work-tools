@@ -1,20 +1,17 @@
 import { createId, STORAGE_KEYS } from "./lib/config.js";
+import {
+  DEFAULT_CHART_THEME_ID,
+  getChartTheme,
+  listChartThemes,
+  normalizeChartTheme,
+  saveCustomChartThemes,
+  validateChartTheme
+} from "./lib/chart-themes.js";
+import { buildEChartsOption } from "./lib/echarts-adapter.js";
 import { normalizeCommonFiltersForStorage } from "./lib/report-rules.js";
 import { getRawDatasetBundle, listDatasets } from "./lib/storage.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-const CHART_COLORS = [
-  "#0f766e",
-  "#d59b3a",
-  "#3b6ea8",
-  "#b4515a",
-  "#6b7c3e",
-  "#8a5c9e",
-  "#2f8c8c",
-  "#c66b2b",
-  "#557a95",
-  "#8b6f47"
-];
 
 const elements = {
   datasetStatus: document.querySelector("#dataset-status"),
@@ -67,6 +64,19 @@ const elements = {
   analysisSummary: document.querySelector("#analysis-summary"),
   dashboardGrid: document.querySelector("#dashboard-grid"),
   dashboardEmpty: document.querySelector("#dashboard-empty"),
+  chartThemeSelect: document.querySelector("#chart-theme-select"),
+  chartThemePreview: document.querySelector("#chart-theme-preview"),
+  createChartThemeButton: document.querySelector("#create-chart-theme-button"),
+  deleteChartThemeButton: document.querySelector("#delete-chart-theme-button"),
+  chartThemeDialog: document.querySelector("#chart-theme-dialog"),
+  chartThemeForm: document.querySelector("#chart-theme-form"),
+  chartThemeDialogClose: document.querySelector("#chart-theme-dialog-close"),
+  chartThemeCancelButton: document.querySelector("#chart-theme-cancel-button"),
+  chartThemeName: document.querySelector("#chart-theme-name"),
+  themeColorList: document.querySelector("#theme-color-list"),
+  themeTextColor: document.querySelector("#theme-text-color"),
+  themeBackgroundColor: document.querySelector("#theme-background-color"),
+  themeAxisColor: document.querySelector("#theme-axis-color"),
   widgetDialog: document.querySelector("#widget-dialog"),
   widgetForm: document.querySelector("#widget-form"),
   widgetDialogTitle: document.querySelector("#widget-dialog-title"),
@@ -142,6 +152,12 @@ const state = {
   sidebarHidden: false,
   hideUnselectedFields: false,
   tablePages: {},
+  chartThemeId: DEFAULT_CHART_THEME_ID,
+  customChartThemes: [],
+  dialogThemeColors: [],
+  chartInstances: new Map(),
+  chartOptions: new Map(),
+  chartResizeObservers: new Map(),
   toastTimer: null
 };
 
@@ -166,7 +182,8 @@ async function initialize() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.reportTemplates,
     STORAGE_KEYS.reportUiState,
-    STORAGE_KEYS.commonFilters
+    STORAGE_KEYS.commonFilters,
+    STORAGE_KEYS.chartThemes
   ]);
   state.reportTemplates = Array.isArray(stored[STORAGE_KEYS.reportTemplates])
     ? stored[STORAGE_KEYS.reportTemplates]
@@ -174,6 +191,14 @@ async function initialize() {
   state.hiddenSections = stored[STORAGE_KEYS.reportUiState]?.hiddenSections || {};
   state.sidebarHidden = Boolean(stored[STORAGE_KEYS.reportUiState]?.sidebarHidden);
   state.hideUnselectedFields = Boolean(stored[STORAGE_KEYS.reportUiState]?.hideUnselectedFields);
+  state.chartThemeId = stored[STORAGE_KEYS.reportUiState]?.chartThemeId
+    || DEFAULT_CHART_THEME_ID;
+  state.customChartThemes = saveCustomChartThemes(
+    [],
+    Array.isArray(stored[STORAGE_KEYS.chartThemes])
+      ? stored[STORAGE_KEYS.chartThemes]
+      : []
+  );
   state.commonFilters = Array.isArray(stored[STORAGE_KEYS.commonFilters])
     ? stored[STORAGE_KEYS.commonFilters]
     : [];
@@ -253,6 +278,13 @@ function bindEvents() {
   elements.commonFilterList.addEventListener("click", handleCommonFilterClick);
 
   elements.addWidgetButton.addEventListener("click", () => openWidgetDialog());
+  elements.chartThemeSelect.addEventListener("change", applySelectedChartTheme);
+  elements.createChartThemeButton.addEventListener("click", openChartThemeDialog);
+  elements.deleteChartThemeButton.addEventListener("click", deleteSelectedChartTheme);
+  elements.chartThemeDialogClose.addEventListener("click", closeChartThemeDialog);
+  elements.chartThemeCancelButton.addEventListener("click", closeChartThemeDialog);
+  elements.chartThemeForm.addEventListener("submit", saveChartThemeFromDialog);
+  elements.themeColorList.addEventListener("input", handleThemeColorInput);
   elements.toggleSidebarButton.addEventListener("click", toggleSidebar);
   elements.immersiveButton.addEventListener("click", () => setImmersive(true));
   elements.immersiveExitButton.addEventListener("click", () => setImmersive(false));
@@ -342,10 +374,13 @@ function bindEvents() {
       refreshReportTemplates().then(async () => {
         renderTemplateSelect();
         renderCommonFilterList();
+        renderChartThemeControls();
         const incoming = state.reportTemplates.find((item) => item.id === message.templateId);
         if (incoming) {
           await applyTemplate(incoming);
           renderAll();
+        } else {
+          renderDashboard();
         }
       });
     }
@@ -372,7 +407,8 @@ function persistReportUiState() {
     [STORAGE_KEYS.reportUiState]: {
       hiddenSections: state.hiddenSections,
       sidebarHidden: state.sidebarHidden,
-      hideUnselectedFields: state.hideUnselectedFields
+      hideUnselectedFields: state.hideUnselectedFields,
+      chartThemeId: state.chartThemeId
     }
   });
 }
@@ -1178,6 +1214,7 @@ function isDateLikeValue(value) {
 
 function renderAll() {
   const startedAt = performance.now();
+  renderChartThemeControls();
   renderTemplateSelect();
   renderFieldList();
   renderMappingEditor();
@@ -1292,7 +1329,9 @@ function findInitialTemplate(requestedTemplateId) {
 async function refreshReportTemplates() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.reportTemplates,
-    STORAGE_KEYS.commonFilters
+    STORAGE_KEYS.commonFilters,
+    STORAGE_KEYS.chartThemes,
+    STORAGE_KEYS.reportUiState
   ]);
   state.reportTemplates = Array.isArray(stored[STORAGE_KEYS.reportTemplates])
     ? stored[STORAGE_KEYS.reportTemplates]
@@ -1303,6 +1342,15 @@ async function refreshReportTemplates() {
       : state.commonFilters,
     state.fieldConfigs
   );
+  state.customChartThemes = saveCustomChartThemes(
+    [],
+    Array.isArray(stored[STORAGE_KEYS.chartThemes])
+      ? stored[STORAGE_KEYS.chartThemes]
+      : state.customChartThemes
+  );
+  state.chartThemeId = stored[STORAGE_KEYS.reportUiState]?.chartThemeId
+    || state.chartThemeId
+    || DEFAULT_CHART_THEME_ID;
 }
 
 function renderFieldList() {
@@ -2257,6 +2305,7 @@ function renderDashboard() {
   if (state.draggingWidgetId) {
     cancelWidgetDrag();
   }
+  disposeAllChartInstances();
   state.widgetRowsCache.clear();
   const selectedFields = getSelectedFieldPaths();
   elements.analysisSummary.replaceChildren();
@@ -2289,7 +2338,7 @@ function renderDashboard() {
     }
     card.style.setProperty(
       "--widget-scale",
-      String(widget.type === "pie" ? 1 : widget.scale || 1)
+      String(widget.scale || 1)
     );
 
     const header = document.createElement("header");
@@ -2684,12 +2733,329 @@ function renderWidgetBody(container, widget) {
     return;
   }
 
+  if (isEChartsReady() && renderEChartsWidget(container, widget, pivot)) {
+    return;
+  }
+
   const chart = widget.type === "pie"
     ? renderPieChart(pivot)
     : widget.type === "line"
       ? renderLineChart(pivot)
       : renderBarChart(pivot, widget.type === "stackedBar");
   container.append(chart.container, chart.legend);
+}
+
+function isEChartsReady() {
+  return Boolean(window.echarts?.init);
+}
+
+function renderEChartsWidget(container, widget, pivot) {
+  let chartElement = null;
+  try {
+    const theme = getCurrentChartTheme();
+    chartElement = document.createElement("div");
+    chartElement.className = "echarts-chart";
+    chartElement.style.background = theme.backgroundColor;
+    chartElement.style.borderRadius = "6px";
+    chartElement.style.height = widget.type === "pie"
+      ? "470px"
+      : widget.type === "line"
+        ? "330px"
+        : "360px";
+    container.append(chartElement);
+
+    const instance = window.echarts.init(chartElement, null, {
+      renderer: "svg"
+    });
+    const option = buildEChartsOption({
+      widget,
+      pivot,
+      theme,
+      metricLabel: metricName(widget)
+    });
+    instance.setOption(option, true);
+    state.chartInstances.set(widget.id, instance);
+    state.chartOptions.set(widget.id, option);
+    applyEChartsLeaderOverlay(instance, option);
+    instance.on("datazoom", () => {
+      applyEChartsLeaderOverlay(instance, option);
+    });
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => {
+        instance.resize();
+        applyEChartsLeaderOverlay(instance, option);
+      });
+      observer.observe(chartElement);
+      state.chartResizeObservers.set(widget.id, observer);
+    }
+    requestAnimationFrame(() => {
+      if (!instance.isDisposed()) {
+        instance.resize();
+        applyEChartsLeaderOverlay(instance, option);
+      }
+    });
+    return true;
+  } catch (error) {
+    chartElement?.remove();
+    console.warn("ECharts render failed, falling back to SVG renderer.", error);
+    return false;
+  }
+}
+
+function disposeAllChartInstances() {
+  for (const observer of state.chartResizeObservers.values()) {
+    observer.disconnect();
+  }
+  state.chartResizeObservers.clear();
+  for (const instance of state.chartInstances.values()) {
+    if (!instance.isDisposed()) {
+      instance.dispose();
+    }
+  }
+  state.chartInstances.clear();
+  state.chartOptions.clear();
+}
+
+function applyEChartsLeaderOverlay(instance, option) {
+  const points = option?.__ssoMeta?.smallPoints;
+  if (!Array.isArray(points) || !points.length || instance.isDisposed()) {
+    return;
+  }
+  const width = instance.getWidth();
+  const height = instance.getHeight();
+  const graphics = [];
+  for (const point of points) {
+    const start = instance.convertToPixel(
+      { xAxisIndex: 0, yAxisIndex: 0 },
+      [point.labelIndex, point.startValue]
+    );
+    const end = instance.convertToPixel(
+      { xAxisIndex: 0, yAxisIndex: 0 },
+      [point.labelIndex, point.endValue]
+    );
+    if (!Array.isArray(start) || !Array.isArray(end)) {
+      continue;
+    }
+    if (
+      end[0] < 0
+      || end[0] > width
+      || end[1] < 0
+      || end[1] > height
+    ) {
+      continue;
+    }
+    const direction = point.seriesIndex % 2 === 0 ? 1 : -1;
+    const centerY = (start[1] + end[1]) / 2;
+    const endY = Math.max(
+      20,
+      Math.min(height - 26, centerY + (point.seriesIndex % 3 - 1) * 12)
+    );
+    const endX = Math.max(
+      36,
+      Math.min(width - 36, end[0] + direction * 62)
+    );
+    graphics.push({
+      type: "polyline",
+      shape: {
+        points: [
+          [end[0], centerY],
+          [end[0] + direction * 12, endY],
+          [endX, endY]
+        ]
+      },
+      style: {
+        stroke: option.textStyle?.color || "#46544d",
+        lineWidth: 0.8,
+        fill: "none"
+      },
+      silent: true
+    });
+    graphics.push({
+      type: "text",
+      left: direction > 0 ? endX + 3 : endX - 3,
+      top: endY - 7,
+      style: {
+        text: formatMetric(point.value),
+        fill: option.textStyle?.color || "#46544d",
+        font: "9px Inter, PingFang SC, Microsoft YaHei, sans-serif",
+        textAlign: direction > 0 ? "left" : "right"
+      },
+      silent: true
+    });
+  }
+  instance.setOption({
+    graphic: [{
+      id: "sso-leader-overlay",
+      type: "group",
+      children: graphics
+    }]
+  }, { lazyUpdate: false, silent: true });
+}
+
+function getCurrentChartTheme() {
+  return getChartTheme(state.chartThemeId, state.customChartThemes);
+}
+
+function renderChartThemeControls() {
+  const themes = listChartThemes(state.customChartThemes);
+  if (!themes.some((theme) => theme.id === state.chartThemeId)) {
+    state.chartThemeId = DEFAULT_CHART_THEME_ID;
+  }
+  elements.chartThemeSelect.replaceChildren();
+  for (const theme of themes) {
+    const option = document.createElement("option");
+    option.value = theme.id;
+    option.textContent = theme.name;
+    elements.chartThemeSelect.append(option);
+  }
+  elements.chartThemeSelect.value = state.chartThemeId;
+  renderChartThemePreview(getCurrentChartTheme());
+  elements.deleteChartThemeButton.disabled = !state.customChartThemes
+    .some((theme) => theme.id === state.chartThemeId);
+}
+
+function renderChartThemePreview(theme) {
+  elements.chartThemePreview.replaceChildren();
+  for (const color of theme.colors.slice(0, 8)) {
+    const swatch = document.createElement("span");
+    swatch.className = "theme-preview-swatch";
+    swatch.style.backgroundColor = color;
+    swatch.title = color;
+    elements.chartThemePreview.append(swatch);
+  }
+}
+
+function applySelectedChartTheme() {
+  state.chartThemeId = elements.chartThemeSelect.value || DEFAULT_CHART_THEME_ID;
+  renderChartThemeControls();
+  persistReportUiState();
+  renderDashboard();
+}
+
+function openChartThemeDialog() {
+  const base = getCurrentChartTheme();
+  state.dialogThemeColors = [...base.colors];
+  elements.chartThemeName.value = `${base.name} 自定义`;
+  elements.themeTextColor.value = base.textColor;
+  elements.themeBackgroundColor.value = base.backgroundColor;
+  elements.themeAxisColor.value = base.axisColor;
+  renderThemeColorInputs();
+  elements.chartThemeDialog.showModal();
+}
+
+function renderThemeColorInputs() {
+  elements.themeColorList.replaceChildren();
+  state.dialogThemeColors.forEach((color, index) => {
+    const row = document.createElement("label");
+    row.className = "color-row";
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = color;
+    input.dataset.themeColorIndex = String(index);
+    const label = document.createElement("span");
+    label.textContent = `分类色 ${index + 1}`;
+    row.append(input, label);
+    elements.themeColorList.append(row);
+  });
+}
+
+function handleThemeColorInput(event) {
+  const index = Number(event.target.dataset.themeColorIndex);
+  if (Number.isInteger(index) && index >= 0) {
+    state.dialogThemeColors[index] = event.target.value;
+  }
+}
+
+function closeChartThemeDialog() {
+  elements.chartThemeDialog.close();
+}
+
+async function saveChartThemeFromDialog(event) {
+  event.preventDefault();
+  const base = getCurrentChartTheme();
+  const name = elements.chartThemeName.value.trim();
+  const textColor = elements.themeTextColor.value;
+  const backgroundColor = elements.themeBackgroundColor.value;
+  const axisColor = elements.themeAxisColor.value;
+  const candidate = normalizeChartTheme({
+    ...base,
+    id: createId("theme"),
+    name,
+    description: `${name || base.name} 自定义配色方案`,
+    colors: [...state.dialogThemeColors],
+    textColor,
+    mutedTextColor: mixHexColors(textColor, backgroundColor, 0.52),
+    backgroundColor,
+    gridColor: mixHexColors(axisColor, backgroundColor, 0.78),
+    axisColor,
+    tooltipBackground: textColor,
+    legendTextColor: textColor
+  });
+  const validation = validateChartTheme(candidate);
+  if (!validation.valid) {
+    showToast(validation.errors[0] || "配色方案无效。");
+    return;
+  }
+
+  state.customChartThemes = saveCustomChartThemes(
+    state.customChartThemes,
+    [candidate]
+  );
+  state.chartThemeId = candidate.id;
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.chartThemes]: state.customChartThemes
+  });
+  persistReportUiState();
+  closeChartThemeDialog();
+  renderChartThemeControls();
+  renderDashboard();
+  showToast(`配色方案“${candidate.name}”已保存并应用。`);
+}
+
+async function deleteSelectedChartTheme() {
+  const theme = getCurrentChartTheme();
+  if (!state.customChartThemes.some((item) => item.id === theme.id)) {
+    return;
+  }
+  if (!confirm(`确定删除配色方案“${theme.name}”吗？`)) {
+    return;
+  }
+  state.customChartThemes = state.customChartThemes.filter((item) => item.id !== theme.id);
+  state.chartThemeId = DEFAULT_CHART_THEME_ID;
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.chartThemes]: state.customChartThemes
+  });
+  persistReportUiState();
+  renderChartThemeControls();
+  renderDashboard();
+  showToast("配色方案已删除。");
+}
+
+function mixHexColors(first, second, secondWeight) {
+  const left = parseHexColor(first);
+  const right = parseHexColor(second);
+  if (!left || !right) {
+    return "#66727a";
+  }
+  const weight = Math.max(0, Math.min(1, Number(secondWeight) || 0));
+  const channel = (key) => Math.round(left[key] * (1 - weight) + right[key] * weight);
+  return `#${[channel("r"), channel("g"), channel("b")]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function parseHexColor(value) {
+  const source = String(value || "").replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(source)) {
+    return null;
+  }
+  const number = Number.parseInt(source, 16);
+  return {
+    r: (number >> 16) & 255,
+    g: (number >> 8) & 255,
+    b: number & 255
+  };
 }
 
 function buildPivotData(widget, rows = getWidgetRows(widget)) {
@@ -3558,7 +3924,9 @@ function buildLegend(labels, colors = []) {
   labels.forEach((label, index) => {
     legend.append(createLegendItem(
       label,
-      colors[index] || CHART_COLORS[index % CHART_COLORS.length]
+      colors[index] || getCurrentChartTheme().colors[
+        index % getCurrentChartTheme().colors.length
+      ]
     ));
   });
   return legend;
@@ -3567,7 +3935,7 @@ function buildLegend(labels, colors = []) {
 function getWidgetColor(widget, index) {
   return isHexColor(widget.colors?.[index])
     ? widget.colors[index]
-    : CHART_COLORS[index % CHART_COLORS.length];
+    : getCurrentChartTheme().colors[index % getCurrentChartTheme().colors.length];
 }
 
 function appendAxisLabel(svg, label, x, y, maxWidth, mode, options = {}) {
@@ -3898,7 +4266,9 @@ function renderWidgetColorInputs() {
     row.className = "color-row";
     const input = document.createElement("input");
     input.type = "color";
-    input.value = state.dialogColors[index] || CHART_COLORS[index % CHART_COLORS.length];
+    const themeColors = getCurrentChartTheme().colors;
+    input.value = state.dialogColors[index]
+      || themeColors[index % themeColors.length];
     input.dataset.index = index;
     linkColorInput(input, index);
     const text = document.createElement("span");
@@ -4296,16 +4666,72 @@ async function exportDashboardPng(immersive = false) {
 
 async function exportWidgetPng(card, widget) {
   try {
-    const canvas = await renderElementCanvas(card, {
-      allowScroll: true,
-      background: "#ffffff"
-    });
+    const canvas = await renderEChartsWidgetCanvas(card, widget)
+      || await renderElementCanvas(card, {
+        allowScroll: true,
+        background: "#ffffff"
+      });
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     downloadBlob(blob, `${safeFileName(widget.title)}.png`);
     showToast("单图 PNG 已导出。");
   } catch (error) {
     showToast(`单图导出失败：${error.message}`);
   }
+}
+
+async function renderEChartsWidgetCanvas(card, widget) {
+  const instance = state.chartInstances.get(widget.id);
+  const originalOption = state.chartOptions.get(widget.id);
+  if (!instance || !originalOption || instance.isDisposed()) {
+    return null;
+  }
+  const labels = Array.isArray(originalOption.xAxis?.data)
+    ? originalOption.xAxis.data
+    : [];
+  if (!originalOption.dataZoom?.length || labels.length <= 10) {
+    return null;
+  }
+
+  const chartElement = instance.getDom();
+  const originalWidth = chartElement.style.width;
+  const fullWidth = Math.max(instance.getWidth(), labels.length * 84 + 120);
+  const exportOption = {
+    ...originalOption,
+    dataZoom: [],
+    graphic: [],
+    xAxis: {
+      ...originalOption.xAxis,
+      axisLabel: {
+        ...originalOption.xAxis.axisLabel,
+        hideOverlap: false,
+        interval: 0,
+        rotate: 28,
+        overflow: "none",
+        width: undefined
+      }
+    }
+  };
+
+  try {
+    chartElement.style.width = `${fullWidth}px`;
+    instance.resize({ width: fullWidth });
+    instance.setOption(exportOption, { notMerge: true, lazyUpdate: false });
+    applyEChartsLeaderOverlay(instance, exportOption);
+    await nextAnimationFrame();
+    return await renderElementCanvas(card, {
+      allowScroll: true,
+      background: "#ffffff"
+    });
+  } finally {
+    chartElement.style.width = originalWidth;
+    instance.resize();
+    instance.setOption(originalOption, { notMerge: true, lazyUpdate: false });
+    applyEChartsLeaderOverlay(instance, originalOption);
+  }
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 async function renderDashboardCanvas(immersive) {
@@ -4406,7 +4832,9 @@ function sanitizeExportClone(root) {
 
 function getFullElementWidth(element) {
   let width = Math.max(element.clientWidth, element.scrollWidth);
-  for (const item of element.querySelectorAll(".chart-scroll, .data-table-wrap")) {
+  for (const item of element.querySelectorAll(
+    ".chart-scroll, .echarts-chart, .data-table-wrap"
+  )) {
     width = Math.max(width, item.scrollWidth + 28);
   }
   return width;
@@ -4595,6 +5023,8 @@ async function exportDashboardRules(dashboardOnly = false) {
       normalizeCommonFilters(state.commonFilters, state.fieldConfigs),
       exportList
     )),
+    chartThemeId: state.chartThemeId,
+    chartThemes: cloneJson(state.customChartThemes),
     fieldMappings: cloneJson(current.fieldMappings),
     templates: cloneJson(exportList)
   };
@@ -4661,10 +5091,19 @@ async function importDashboardRules() {
       state.commonFilters,
       normalizeCommonFiltersForStorage(packageData?.commonFilters, imported)
     );
+    state.customChartThemes = saveCustomChartThemes(
+      state.customChartThemes,
+      packageData?.chartThemes
+    );
+    if (packageData?.chartThemeId) {
+      state.chartThemeId = packageData.chartThemeId;
+    }
     await chrome.storage.local.set({
       [STORAGE_KEYS.reportTemplates]: state.reportTemplates,
-      [STORAGE_KEYS.commonFilters]: state.commonFilters
+      [STORAGE_KEYS.commonFilters]: state.commonFilters,
+      [STORAGE_KEYS.chartThemes]: state.customChartThemes
     });
+    persistReportUiState();
     broadcast({ type: "REPORT_TEMPLATES_UPDATED", templateId: imported[0].id });
     await applyTemplate(imported[0]);
     renderAll();

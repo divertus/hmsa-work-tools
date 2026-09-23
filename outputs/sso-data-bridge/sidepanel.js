@@ -5,6 +5,7 @@ import {
   STORAGE_KEYS,
   validateConfig
 } from "./lib/config.js";
+import { saveCustomChartThemes } from "./lib/chart-themes.js";
 import { normalizeCommonFiltersForStorage } from "./lib/report-rules.js";
 
 const elements = {
@@ -482,7 +483,11 @@ async function importDashboardPackage(packageData) {
     }));
 
   reportTemplates.push(...normalizedTemplates);
-  const commonStored = await chrome.storage.local.get(STORAGE_KEYS.commonFilters);
+  const commonStored = await chrome.storage.local.get([
+    STORAGE_KEYS.commonFilters,
+    STORAGE_KEYS.chartThemes,
+    STORAGE_KEYS.reportUiState
+  ]);
   const storedCommonFilters = Array.isArray(commonStored[STORAGE_KEYS.commonFilters])
     ? commonStored[STORAGE_KEYS.commonFilters]
     : [];
@@ -495,13 +500,25 @@ async function importDashboardPackage(packageData) {
     ...storedCommonFilters,
     ...importedCommonFilters
   ], normalizedTemplates);
+  const mergedChartThemes = saveCustomChartThemes(
+    commonStored[STORAGE_KEYS.chartThemes],
+    packageData.chartThemes
+  );
+  const reportUiState = {
+    ...(commonStored[STORAGE_KEYS.reportUiState] || {}),
+    ...(packageData.chartThemeId
+      ? { chartThemeId: packageData.chartThemeId }
+      : {})
+  };
   await Promise.all([
     persistProfiles(),
     chrome.storage.local.set({
       [STORAGE_KEYS.activeProfileId]: activeProfileId,
       [STORAGE_KEYS.draft]: currentConfig,
       [STORAGE_KEYS.reportTemplates]: reportTemplates,
-      [STORAGE_KEYS.commonFilters]: mergedCommonFilters
+      [STORAGE_KEYS.commonFilters]: mergedCommonFilters,
+      [STORAGE_KEYS.chartThemes]: mergedChartThemes,
+      [STORAGE_KEYS.reportUiState]: reportUiState
     })
   ]);
   renderProfileSelect();
