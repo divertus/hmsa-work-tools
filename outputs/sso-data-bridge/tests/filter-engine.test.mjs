@@ -173,6 +173,14 @@ test("组件副本标题保持唯一", () => {
   assert.equal(second, "销售额 副本 2");
 });
 
+test("导出 HTML 的内联表格分页脚本语法有效", () => {
+  const match = reportSource.match(/const EXPORTED_TABLE_SCRIPT = `([\s\S]*?)`;/);
+  assert.ok(match, "missing exported table script");
+  assert.doesNotThrow(() => new Function(match[1]));
+  assert.match(match[1], /data-export-table-prev/);
+  assert.match(match[1], /pageSize/);
+});
+
 test("拖拽区域重叠率按目标组件面积计算", () => {
   const target = { left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 };
 
@@ -221,6 +229,35 @@ test("旧版根 conditions 保留嵌套分组和引用", () => {
   assert.equal(normalized.children[2].name, "已保存条件");
 });
 
+test("筛选内部统一转换为原始字段路径", () => {
+  const normalized = normalizer.normalizeFilters({
+    logic: "all",
+    children: [{
+      type: "condition",
+      field: "订单状态",
+      operator: "equals",
+      value: "已完成"
+    }]
+  }, [{
+    path: "status",
+    label: "订单状态"
+  }]);
+
+  assert.equal(normalized.children[0].field, "status");
+});
+
+test("匹配逻辑对旧别名条件回退到原始字段", () => {
+  const helpers = createReportHelpers({
+    reportTemplates: [],
+    fieldConfigs: [{ path: "status", label: "订单状态" }]
+  });
+
+  assert.equal(helpers.matchesFilter(
+    { status: "已完成" },
+    { field: "订单状态", operator: "equals", value: "已完成" }
+  ), true);
+});
+
 function createFilterEngine() {
   const names = [
     "isFilterConditionReady",
@@ -264,11 +301,16 @@ function createReportHelpers(state = { reportTemplates: [] }) {
     extractFunction("renameCommonFilterReferences"),
     extractFunction("syncCommonFilterToTemplates"),
     extractFunction("nextCopiedWidgetTitle"),
+    extractFunction("resolveFieldPath"),
+    extractFunction("resolveFieldReference"),
+    extractFunction("matchesFilter"),
     extractFunction("escapeXml")
   ].join("\n");
   return new Function(
     "state",
     "cloneJson",
+    "isDateLikeValue",
+    "toDateBoundary",
     `${source}
     return {
       state,
@@ -277,11 +319,14 @@ function createReportHelpers(state = { reportTemplates: [] }) {
       renameCommonFilterReferences,
       syncCommonFilterToTemplates,
       nextCopiedWidgetTitle,
+      matchesFilter,
       escapeXml
     };`
   )(
     state,
-    (value) => JSON.parse(JSON.stringify(value))
+    (value) => JSON.parse(JSON.stringify(value)),
+    () => false,
+    () => null
   );
 }
 
@@ -290,6 +335,7 @@ function createFilterNormalizer() {
     extractFunction("normalizeFilters"),
     extractFunction("normalizeFilterNode"),
     extractFunction("normalizeFilterCondition"),
+    extractFunction("resolveFieldPath"),
     extractFunction("createFilterGroup")
   ].join("\n");
   return new Function(

@@ -55,6 +55,8 @@ test("恢复旧规则中只有名称的常用条件关系", () => {
   assert.equal(restored.id, "common-template");
   assert.equal(restored.name, "风险条件");
   assert.equal(restored.group.logic, "any");
+  assert.equal(restored.filters.logic, "any");
+  assert.equal(restored.filters.children.length, 2);
   assert.equal(restored.group.children[1].logic, "all");
   assert.equal(restored.group.children[1].children[0].value, "华东");
   assert.equal(restored.group.children[1].children[1].value, "10");
@@ -111,4 +113,49 @@ test("兼容单个常用条件对象格式", () => {
 
   assert.equal(restored.name, "风险条件");
   assert.equal(restored.group.children.length, 2);
+});
+
+test("重新拉取数据后本地常用条件关系不变", () => {
+  const stored = [{
+    ...nestedCommonFilter,
+    filters: structuredClone(nestedCommonFilter.group)
+  }];
+  const [restored] = normalizeCommonFiltersForStorage(stored);
+
+  assert.equal(restored.group.logic, "any");
+  assert.equal(restored.filters.logic, "any");
+  assert.equal(restored.group.children[1].logic, "all");
+});
+
+test("完整规则和仅看板规则导入都恢复常用条件关系", () => {
+  const fullPackage = {
+    type: "sso-data-bridge-dashboard-package",
+    commonFilters: [{ name: "风险条件" }],
+    templates: [{ commonFilters: [nestedCommonFilter] }]
+  };
+  const dashboardOnlyPackage = {
+    type: "sso-data-bridge-dashboard-only",
+    commonFilters: [{
+      ...nestedCommonFilter,
+      filters: structuredClone(nestedCommonFilter.group)
+    }],
+    templates: [{}]
+  };
+
+  const [fromFull] = normalizeCommonFiltersForStorage(
+    fullPackage.commonFilters,
+    fullPackage.templates
+  );
+  const [fromDashboard] = normalizeCommonFiltersForStorage(
+    dashboardOnlyPackage.commonFilters,
+    dashboardOnlyPackage.templates
+  );
+
+  for (const restored of [fromFull, fromDashboard]) {
+    assert.equal(restored.name, "风险条件");
+    assert.equal(restored.group.logic, "any");
+    assert.equal(restored.filters.logic, "any");
+    assert.equal(restored.group.children[1].children[0].value, "华东");
+    assert.equal(restored.group.children[1].children[1].value, "10");
+  }
 });

@@ -658,13 +658,14 @@ function invalidateDerivedCaches() {
 
 function applyValueMappings(flattened) {
   for (const [field, mappings] of Object.entries(state.valueMappings || {})) {
-    if (!(field in flattened) || !Array.isArray(mappings)) {
+    const fieldPath = resolveFieldReference(field);
+    if (!(fieldPath in flattened) || !Array.isArray(mappings)) {
       continue;
     }
-    const sourceValue = String(flattened[field] ?? "");
+    const sourceValue = String(flattened[fieldPath] ?? "");
     const match = mappings.find((mapping) => String(mapping.sourceValue ?? "") === sourceValue);
     if (match && String(match.mappedValue ?? "") !== "") {
-      flattened[field] = match.mappedValue;
+      flattened[fieldPath] = match.mappedValue;
     }
   }
 }
@@ -712,14 +713,18 @@ function applyFieldMappings(flattened) {
 }
 
 function resolveFieldReference(reference) {
+  return resolveFieldPath(reference, state.fieldConfigs);
+}
+
+function resolveFieldPath(reference, fields = state.fieldConfigs) {
   const value = String(reference || "").trim();
   if (!value) {
     return "";
   }
   const normalized = value.toLowerCase();
-  const matched = state.fieldConfigs.find((field) => (
-    field.path.toLowerCase() === normalized
-    || field.label.toLowerCase() === normalized
+  const matched = (fields || []).find((field) => (
+    String(field.path || "").toLowerCase() === normalized
+    || String(field.label || "").toLowerCase() === normalized
   ));
   return matched?.path || value;
 }
@@ -876,7 +881,7 @@ function findFilterNode(root, id, parent = null) {
 }
 
 function matchesFilter(row, condition) {
-  const rawValue = row[condition.field];
+  const rawValue = row[resolveFieldReference(condition.field)];
   const value = rawValue === undefined || rawValue === null ? "" : String(rawValue);
   const target = String(condition.value ?? "");
   const numberValue = Number(rawValue);
@@ -1651,9 +1656,10 @@ function handleMappingClick(event) {
 }
 
 function getDistinctFieldValues(field) {
+  const fieldPath = resolveFieldReference(field);
   const counts = new Map();
   for (const row of state.sourceRows) {
-    const value = getFlattenedRow(row)[field];
+    const value = getFlattenedRow(row)[fieldPath];
     const key = String(value ?? "");
     const current = counts.get(key) || { value, count: 0 };
     current.count += 1;
@@ -1712,6 +1718,7 @@ async function saveCommonFilter() {
   const editing = state.commonFilters.find((item) => item.id === state.editingCommonFilterId) || null;
   const previousName = editing?.name || "";
   const name = elements.commonFilterName.value.trim() || editing?.name || "";
+  const group = captureCommonFilterGroup();
   if (!name) {
     showToast("请输入常用条件名称。");
     return;
@@ -1721,7 +1728,8 @@ async function saveCommonFilter() {
     return;
   }
   if (editing) {
-    editing.group = cloneJson(state.filters);
+    editing.group = cloneJson(group);
+    editing.filters = cloneJson(group);
     if (name !== previousName) {
       renameCommonFilterReferencesInState(previousName, name);
     }
@@ -1732,7 +1740,8 @@ async function saveCommonFilter() {
     state.commonFilters.push({
       id: createId("common-filter"),
       name,
-      group: cloneJson(state.filters)
+      group: cloneJson(group),
+      filters: cloneJson(group)
     });
   }
   await chrome.storage.local.set(editing
@@ -1749,6 +1758,16 @@ async function saveCommonFilter() {
   renderWidgetFilterEditor();
   renderDashboard();
   showToast(editing ? `常用条件“${name}”已更新。` : `常用条件“${name}”已保存。`);
+}
+
+function captureCommonFilterGroup() {
+  const group = normalizeFilters(state.filters, state.fieldConfigs);
+  const [stored] = normalizeCommonFiltersForStorage([{
+    id: state.editingCommonFilterId || createId("common-filter"),
+    name: state.editingCommonFilterName || elements.commonFilterName.value.trim() || "临时条件",
+    group
+  }]);
+  return cloneJson(stored?.group || group);
 }
 
 function handleCommonFilterClick(event) {
@@ -1836,6 +1855,7 @@ function syncCommonFilterToTemplates(commonFilter, previousName) {
         item.id = commonFilter.id;
         item.name = commonFilter.name;
         item.group = cloneJson(commonFilter.group);
+        item.filters = cloneJson(commonFilter.group);
       }
     }
   }
@@ -2673,8 +2693,8 @@ function renderWidgetBody(container, widget) {
 }
 
 function buildPivotData(widget, rows = getWidgetRows(widget)) {
-  const dimension = widget.dimension || "";
-  const seriesField = widget.series || "";
+  const dimension = resolveFieldReference(widget.dimension || "");
+  const seriesField = resolveFieldReference(widget.series || "");
   const groupMap = new Map();
   const seriesNames = new Set();
 
@@ -2942,7 +2962,7 @@ function renderBarChart(pivot, stacked) {
   const labelTextWidth = longestLabel * 7;
   const labelBottom = axisLabelMode === "wrap"
     ? Math.max(92, Math.ceil(longestLabel / 9) * 13 + 24)
-    : Math.max(82, Math.sin((32 * Math.PI) / 180) * labelTextWidth + 24);
+    : Math.max(88, Math.sin((32 * Math.PI) / 180) * labelTextWidth + 34);
   const margin = {
     top: 28,
     right: leaderPadding,
@@ -2953,6 +2973,7 @@ function renderBarChart(pivot, stacked) {
   const height = Math.max(330, 248 + margin.bottom);
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
+  const axisBottom = margin.top + plotHeight;
   const svg = createChartSvg(width, height, stacked ? "堆积条形图" : "条形图");
   const totals = stacked
     ? pivot.labels.map((label, index) => (
@@ -3029,7 +3050,12 @@ function renderBarChart(pivot, stacked) {
           width: Math.max(2, barWidth - 2),
           height: Math.max(0, barHeight),
           fill: pivot.seriesNames.length === 1
-            ? getWidgetColor(widget, labelIndex)
+            ? getWidgetColor(
+              widget,
+              Array.isArray(widget.colors) && widget.colors.length
+                ? labelIndex
+                : 0
+            )
             : getWidgetColor(widget, seriesIndex),
           rx: 2
         });
@@ -3058,7 +3084,15 @@ function renderBarChart(pivot, stacked) {
         }
       });
     }
-    appendAxisLabel(svg, label, xCenter, height - 18, Math.max(48, step - 8), axisLabelMode);
+    appendAxisLabel(
+      svg,
+      label,
+      xCenter,
+      axisBottom + 18,
+      Math.max(48, step - 8),
+      axisLabelMode,
+      { growDown: true }
+    );
   });
 
   const legendLabels = pivot.seriesNames.length > 1 ? pivot.seriesNames : [metricName(widget)];
@@ -3077,7 +3111,7 @@ function renderPieChart(pivot) {
   const chartScale = Math.min(3, Math.max(0.5, Number(pivot.widget.scale) || 1));
   const width = Math.round(1000 * chartScale);
   const height = Math.round(520 * chartScale);
-  const cx = Math.round(330 * chartScale);
+  const cx = Math.round(400 * chartScale);
   const cy = Math.round(240 * chartScale);
   const radius = Math.round(170 * chartScale);
   const values = pivot.totals;
@@ -3113,17 +3147,25 @@ function renderPieChart(pivot) {
     svg.append(path);
     if (pivot.widget.showValues) {
       const mode = pivot.widget.smallValueMode || "leader";
-      if (share >= 0.05 || mode === "shrink") {
+      if (share >= 0.05) {
+        const labelPoint = polarToCartesian(cx, cy, radius * 0.66, middleAngle);
+        appendSvgText(svg, labelText, labelPoint.x, labelPoint.y + 3, {
+          anchor: "middle",
+          fill: "#ffffff",
+          size: 9
+        });
+      } else if (mode === "shrink") {
         const arcWidth = Math.max(4, share * Math.PI * 2 * radius * 0.66);
-        const size = share >= 0.05
-          ? 10
-          : Math.max(3, Math.min(10, arcWidth / Math.max(3, labelText.length * 0.62)));
+        const size = Math.max(3, Math.min(10, arcWidth / Math.max(3, labelText.length * 0.62)));
+        const naturalWidth = labelText.length * size * 0.58;
         const labelPoint = polarToCartesian(cx, cy, radius * 0.66, middleAngle);
         appendSvgText(svg, labelText, labelPoint.x, labelPoint.y + 3, {
           anchor: "middle",
           fill: "#ffffff",
           size,
-          textLength: Math.max(4, arcWidth * 0.86),
+          textLength: naturalWidth > arcWidth * 0.86
+            ? Math.max(4, arcWidth * 0.86)
+            : null,
           lengthAdjust: "spacingAndGlyphs"
         });
       } else if (mode === "leader") {
@@ -3528,11 +3570,13 @@ function getWidgetColor(widget, index) {
     : CHART_COLORS[index % CHART_COLORS.length];
 }
 
-function appendAxisLabel(svg, label, x, y, maxWidth, mode) {
+function appendAxisLabel(svg, label, x, y, maxWidth, mode, options = {}) {
   if (mode === "wrap") {
     const maxChars = Math.max(5, Math.floor(maxWidth / 8));
     const lines = splitLabel(label, maxChars);
-    const startY = y - Math.max(0, lines.length - 1) * 12;
+    const startY = options.growDown
+      ? y
+      : y - Math.max(0, lines.length - 1) * 12;
     lines.forEach((line, index) => {
       appendSvgText(svg, line, x, startY + index * 12, {
         anchor: "middle",
@@ -3595,8 +3639,9 @@ function aggregateRows(rows, field, aggregation) {
     return rows.length;
   }
 
+  const fieldPath = resolveFieldReference(field);
   const values = rows
-    .map((row) => getFlattenedRow(row)[field])
+    .map((row) => getFlattenedRow(row)[fieldPath])
     .filter((value) => value !== undefined && value !== null && value !== "");
 
   if (aggregation === "distinct") {
@@ -3992,17 +4037,19 @@ function normalizeFilters(filters, fields) {
       || Array.isArray(filters.conditions)
     )
   ) {
-    return normalizeFilterNode(filters, validPaths, true);
+    return normalizeFilterNode(filters, validPaths, true, fields);
   }
 
   const group = createFilterGroup(filters?.logic === "any" ? "any" : "all");
   group.children = Array.isArray(filters?.conditions)
-    ? filters.conditions.map((condition) => normalizeFilterCondition(condition, validPaths)).filter(Boolean)
+    ? filters.conditions
+      .map((condition) => normalizeFilterCondition(condition, validPaths, fields))
+      .filter(Boolean)
     : [];
   return group;
 }
 
-function normalizeFilterNode(node, validPaths, forceGroup = false) {
+function normalizeFilterNode(node, validPaths, forceGroup = false, fields = state.fieldConfigs) {
   if (node?.type === "reference" && node.name) {
     return {
       id: node.id || createId("filter-reference"),
@@ -4026,21 +4073,22 @@ function normalizeFilterNode(node, validPaths, forceGroup = false) {
         ? node.conditions
         : [];
     group.children = children
-      .map((child) => normalizeFilterNode(child, validPaths, false))
+      .map((child) => normalizeFilterNode(child, validPaths, false, fields))
       .filter(Boolean);
     return group;
   }
-  return normalizeFilterCondition(node, validPaths);
+  return normalizeFilterCondition(node, validPaths, fields);
 }
 
-function normalizeFilterCondition(condition, validPaths) {
-  if (!condition || !validPaths.has(condition.field)) {
+function normalizeFilterCondition(condition, validPaths, fields = state.fieldConfigs) {
+  const field = resolveFieldPath(condition?.field, fields);
+  if (!condition || !validPaths.has(field)) {
     return null;
   }
   return {
     id: condition.id || createId("filter"),
     type: "condition",
-    field: condition.field,
+    field,
     operator: FILTER_OPERATORS[condition.operator] ? condition.operator : "contains",
     value: String(condition.value ?? condition.conditionValue ?? ""),
     enabled: condition.enabled !== false
@@ -4108,10 +4156,12 @@ function normalizeCommonFilters(commonFilters, fields = state.fieldConfigs) {
     if (!name) {
       continue;
     }
+    const group = normalizeFilters(item.group || item.filters || item, fields);
     unique.set(name, {
       id: item.id || createId("common-filter"),
       name,
-      group: normalizeFilters(item.group || item.filters || item, fields)
+      group,
+      filters: cloneJson(group)
     });
   }
   return [...unique.values()];
@@ -4369,6 +4419,7 @@ async function exportDashboardHtml() {
     clone.querySelectorAll(
       ".widget-actions, .widget-drag-preview, .widget-drop-placeholder, .widget-drag-handle, .chart-tooltip"
     ).forEach((element) => element.remove());
+    prepareInteractiveTableExports(clone);
     const css = await fetch(chrome.runtime.getURL("report.css")).then((response) => response.text());
     const title = `${state.dataset.name || "数据分析"} · Dashboard`;
     const html = `<!doctype html>
@@ -4388,6 +4439,7 @@ async function exportDashboardHtml() {
     </div>
     ${clone.outerHTML}
   </main>
+  <script>${EXPORTED_TABLE_SCRIPT}</script>
 </body>
 </html>`;
     downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `${safeFileName(state.dataset.name)}-dashboard.html`);
@@ -4396,6 +4448,126 @@ async function exportDashboardHtml() {
     showToast(`HTML 导出失败：${error.message}`);
   }
 }
+
+function prepareInteractiveTableExports(clone) {
+  for (const widget of state.widgets.filter((item) => item.type === "table")) {
+    const card = [...clone.querySelectorAll(".widget-card")]
+      .find((item) => item.dataset.id === widget.id);
+    const body = card?.querySelector(".widget-body");
+    if (!body) {
+      continue;
+    }
+    body.replaceChildren(createInteractiveTableExport(widget));
+  }
+}
+
+function createInteractiveTableExport(widget) {
+  const fields = getSelectedFields();
+  const rows = getWidgetRows(widget).map((row) => {
+    const flattened = getFlattenedRow(row);
+    return fields.map((field) => displayValue(flattened[field.path]));
+  });
+  const pageSize = Math.max(1, Number(widget.pageSize) || 20);
+  const root = document.createElement("div");
+  root.className = "table-export-root";
+  root.dataset.exportTable = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "data-table-wrap";
+  const table = document.createElement("table");
+  table.className = "data-table";
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const field of fields) {
+    const th = document.createElement("th");
+    th.textContent = field.label;
+    headerRow.append(th);
+  }
+  thead.append(headerRow);
+  const tbody = document.createElement("tbody");
+  table.append(thead, tbody);
+  wrap.append(table);
+
+  const controls = document.createElement("div");
+  controls.className = "table-pagination";
+  const status = document.createElement("span");
+  status.className = "table-page-status";
+  status.dataset.exportTableStatus = "";
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.className = "mini-button";
+  previous.dataset.exportTablePrev = "";
+  previous.textContent = "上一页";
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "mini-button";
+  next.dataset.exportTableNext = "";
+  next.textContent = "下一页";
+  controls.append(status, previous, next);
+
+  const data = document.createElement("script");
+  data.type = "application/json";
+  data.dataset.exportTableData = "";
+  data.textContent = JSON.stringify({ pageSize, rows }).replace(/</g, "\\u003c");
+
+  root.append(wrap, controls, data);
+  return root;
+}
+
+const EXPORTED_TABLE_SCRIPT = `
+(() => {
+  document.querySelectorAll("[data-export-table]").forEach((root) => {
+    const dataNode = root.querySelector("[data-export-table-data]");
+    const tbody = root.querySelector("tbody");
+    const status = root.querySelector("[data-export-table-status]");
+    const previous = root.querySelector("[data-export-table-prev]");
+    const next = root.querySelector("[data-export-table-next]");
+    if (!dataNode || !tbody || !status || !previous || !next) return;
+    const data = JSON.parse(dataNode.textContent || "{}");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const pageSize = Math.max(1, Number(data.pageSize) || 20);
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    let page = 1;
+    const render = () => {
+      tbody.replaceChildren();
+      const start = (page - 1) * pageSize;
+      const pageRows = rows.slice(start, start + pageSize);
+      if (!pageRows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = Math.max(1, root.querySelectorAll("thead th").length);
+        td.className = "table-empty-cell";
+        td.textContent = "当前筛选条件下没有数据。";
+        tr.append(td);
+        tbody.append(tr);
+      } else {
+        pageRows.forEach((row) => {
+          const tr = document.createElement("tr");
+          row.forEach((value) => {
+            const td = document.createElement("td");
+            td.textContent = value;
+            td.title = value;
+            tr.append(td);
+          });
+          tbody.append(tr);
+        });
+      }
+      status.textContent = "第 " + page + " / " + totalPages + " 页 · 每页 " + pageSize + " 条 · 共 " + rows.length + " 条";
+      previous.disabled = page <= 1;
+      next.disabled = page >= totalPages;
+    };
+    previous.addEventListener("click", () => {
+      page = Math.max(1, page - 1);
+      render();
+    });
+    next.addEventListener("click", () => {
+      page = Math.min(totalPages, page + 1);
+      render();
+    });
+    render();
+  });
+})();
+`;
 
 async function exportDashboardRules(dashboardOnly = false) {
   cancelWidgetDrag();

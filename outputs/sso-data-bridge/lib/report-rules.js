@@ -31,6 +31,7 @@ export function normalizeCommonFiltersForStorage(commonFilters, templates = []) 
     }
 
     const group = bestFilterGroup(item);
+    const storedGroup = JSON.parse(JSON.stringify(group));
     const score = countFilterNodes(group);
     const current = selected.get(name);
     if (
@@ -41,7 +42,8 @@ export function normalizeCommonFiltersForStorage(commonFilters, templates = []) 
       selected.set(name, {
         id: item.id || createId("common-filter"),
         name,
-        group,
+        group: storedGroup,
+        filters: JSON.parse(JSON.stringify(storedGroup)),
         score,
         priority
       });
